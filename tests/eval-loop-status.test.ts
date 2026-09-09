@@ -1,8 +1,8 @@
 /**
- * 260907_2: eval-loop（品質ループ）の進捗バッジ。
- * ~/.claude/eval-loop/registry/{sessions,agents}/<id> に書かれた state.json の絶対パスをたどり、
- * state（schema_version 3。2026-09-07 実測）と codex ジョブ（jobs/iter-NNN-<role>/）から
- * 「ループ 2/4・codex 実装中 1分・最高 78点」のような 1 行を作る。
+ * 260907_2 / 260908_1: eval-loop（品質ループ）の進捗バッジと「作業継続中」判定の材料。
+ * eval-loop プラグイン v0.2 が `<cwd>/.mso/sessions/<sid>/state.json`（直列）と `<cwd>/.mso/agents/<agent>/state.json`（fork）に
+ * 書く state と、`turns/turn-NNN-<plan|generator>-progress.log`（PHASE_START … PHASE_END）から
+ * 「ループ 2/4・codex 実装中 1分・最高 78点」のような 1 行と、進行中か／codex ジョブが走っているかを作る。
  */
 import * as fs from "fs";
 import * as os from "os";
@@ -10,66 +10,82 @@ import * as path from "path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   ENDED_SHOW_MS,
+  JOB_STALE_MS,
   describeLoop,
-  evalLoopDir,
-  loopTextForSessions,
+  findLoopsForSession,
+  loopStatusForSessions,
   parseLoopState,
   readRunningJob,
+  summarizeLoops,
   type LoopState,
 } from "../src/main/eval-loop-status";
 
-const NOW = Date.parse("2026-09-07T04:30:00.000Z");
+const NOW = Date.parse("2026-09-08T08:30:00.000Z");
 const NOW_S = Math.floor(NOW / 1000);
 
-/** 実測の state.json（Monthly-report 2026-09-07。長いフィールドは省略） */
+/** 実測の state.json（Pricefluctuation-app 2026-09-08。長いフィールドは省略） */
 const REAL_STATE = {
-  schema_version: 3,
   loop_type: "eval",
   active: true,
   iteration: 0,
   max_iterations: 4,
   threshold: 90,
-  started_at: 1788718215,
+  started_at: 1788854627,
+  max_wall_minutes: 360,
   ended_reason: null,
-  session_id: "9b6dc513-88c5-46c0-a49e-6d396fb496c7",
+  session_id: "632eda45-2131-4192-aaaf-5f6c4cf5baf1",
   agent_id: null,
-  jobs_dir: "C:/Users/hppym/dev/Monthly-report/.mso/sessions/9b6dc513/jobs",
+  project_dir: "C:/dev/Pricefluctuation-app",
+  task: "ホットキー（キーボードショートカット）設定機能を構築する。",
   latest_score: null,
   best_score: null,
-  phase: "generator",
-  generator_skill: "assign-eval-loop-generator",
+  turns_dir: "C:/dev/Pricefluctuation-app/.mso/sessions/632eda45-2131-4192-aaaf-5f6c4cf5baf1/turns",
+  phase: "plan",
+  generator_skill: "assign-codex-generator",
   evaluator_skill: "assign-eval-loop-evaluator",
 };
 
 function state(over: Partial<LoopState> = {}): LoopState {
-  return { active: true, iteration: 0, maxIterations: 4, ...over };
+  return { active: true, iteration: 0, maxIterations: 4, hasTask: true, ...over };
 }
 
 describe("parseLoopState", () => {
-  it("実測フォーマットから表示に要る項目を取り出す", () => {
-    expect(parseLoopState(JSON.stringify(REAL_STATE))).toEqual({
+  it("実測フォーマットから表示に要る項目を取り出す（turns_dir・mtime も載る）", () => {
+    expect(parseLoopState(JSON.stringify(REAL_STATE), NOW)).toEqual({
       active: true,
       iteration: 0,
       maxIterations: 4,
-      phase: "generator",
+      phase: "plan",
       threshold: 90,
-      sessionId: "9b6dc513-88c5-46c0-a49e-6d396fb496c7",
-      jobsDir: "C:/Users/hppym/dev/Monthly-report/.mso/sessions/9b6dc513/jobs",
+      sessionId: "632eda45-2131-4192-aaaf-5f6c4cf5baf1",
+      turnsDir: REAL_STATE.turns_dir,
+      mtimeMs: NOW,
+      hasTask: true,
     });
   });
 
-  it("終了した state（active=false・ended_reason・ended_at・score）も読める。agent_id があれば載る", () => {
-    const s = parseLoopState(
-      JSON.stringify({ ...REAL_STATE, active: false, ended_reason: "threshold_met", ended_at: 1788719308, latest_score: 100, best_score: 100, agent_id: "a6be3bf9a9c1e87d1", session_id: "cf955ad8" })
-    );
-    expect(s).toMatchObject({ active: false, endedReason: "threshold_met", endedAt: 1788719308, latestScore: 100, bestScore: 100, agentId: "a6be3bf9a9c1e87d1", sessionId: "cf955ad8" });
+  it("task が空・\"task not set\"・欠落 は hasTask=false（SubagentStart の事前作成 state = ループ未開始。260908_2）", () => {
+    expect(parseLoopState(JSON.stringify({ ...REAL_STATE, task: "" }))?.hasTask).toBe(false);
+    expect(parseLoopState(JSON.stringify({ ...REAL_STATE, task: "task not set" }))?.hasTask).toBe(false);
+    expect(parseLoopState(JSON.stringify({ ...REAL_STATE, task: "  " }))?.hasTask).toBe(false);
+    expect(parseLoopState(JSON.stringify({ active: true }))?.hasTask).toBe(false);
+    expect(parseLoopState(JSON.stringify(REAL_STATE))?.hasTask).toBe(true);
+  });
+
+  it("終了した state: ended_at があればそれ、無ければ（プラグイン v0.2 は書かない）ファイル mtime を終了時刻にする", () => {
+    const ended = { ...REAL_STATE, active: false, ended_reason: "threshold_met", latest_score: 100, best_score: 100, agent_id: "a6be3bf9", session_id: "cf955ad8" };
+    expect(parseLoopState(JSON.stringify({ ...ended, ended_at: 1788719308 }), NOW)).toMatchObject({
+      active: false, endedReason: "threshold_met", endedAt: 1788719308, latestScore: 100, bestScore: 100, agentId: "a6be3bf9", sessionId: "cf955ad8",
+    });
+    expect(parseLoopState(JSON.stringify(ended), NOW)).toMatchObject({ active: false, endedAt: NOW_S });
+    expect(parseLoopState(JSON.stringify(ended))).not.toHaveProperty("endedAt"); // mtime も無ければ終了時刻不明
   });
 
   it("壊れた JSON・オブジェクトでない・active が boolean でない は null。iteration/max の欠落は 0 / 12（loop-control の既定）", () => {
     expect(parseLoopState("{")).toBe(null);
     expect(parseLoopState("[1]")).toBe(null);
     expect(parseLoopState(JSON.stringify({ iteration: 1 }))).toBe(null);
-    expect(parseLoopState(JSON.stringify({ active: true }))).toEqual({ active: true, iteration: 0, maxIterations: 12 });
+    expect(parseLoopState(JSON.stringify({ active: true }))).toEqual({ active: true, iteration: 0, maxIterations: 12, hasTask: false });
   });
 });
 
@@ -83,10 +99,10 @@ describe("describeLoop（表示文字列）", () => {
     expect(describeLoop(state({ phase: "something-new" }), null, NOW)).toBe("ループ 1/4・進行中");
   });
 
-  it("codex ジョブが走っていれば phase より優先して「codex 実装中／採点中 + 経過」を出す", () => {
+  it("codex ジョブが走っていれば phase より優先して「codex 計画中／実装中 + 経過」を出す", () => {
     expect(describeLoop(state({ phase: "generator" }), { role: "generator", elapsedMs: 65_000 }, NOW)).toBe("ループ 1/4・codex 実装中 1分");
-    expect(describeLoop(state({ phase: "evaluator" }), { role: "evaluator", elapsedMs: 20_000 }, NOW)).toBe("ループ 1/4・codex 採点中 0分");
-    expect(describeLoop(state({ phase: "evaluator" }), { role: "debate", elapsedMs: 3_700_000 }, NOW)).toBe("ループ 1/4・codex 採点中 61分");
+    expect(describeLoop(state({ phase: "plan" }), { role: "plan", elapsedMs: 20_000 }, NOW)).toBe("ループ 1/4・codex 計画中 0分");
+    expect(describeLoop(state({ phase: "generator" }), { role: "generator", elapsedMs: 3_700_000 }, NOW)).toBe("ループ 1/4・codex 実装中 61分");
   });
 
   it("2 周目以降で最高点があれば末尾に付ける（1 周目は付けない）", () => {
@@ -108,13 +124,13 @@ describe("describeLoop（表示文字列）", () => {
     expect(describeLoop(ended("threshold_met", { endedAt: NOW_S - ENDED_SHOW_MS / 1000 }), null, NOW)).toBe("ループ終了・合格");
   });
 
-  it("never_started（task 未設定のまま掃除された state）と ended_at の無い終了は出さない", () => {
+  it("never_started（task 未設定のまま掃除された state）と終了時刻不明の終了は出さない", () => {
     expect(describeLoop(state({ active: false, endedReason: "never_started", endedAt: NOW_S }), null, NOW)).toBeUndefined();
     expect(describeLoop(state({ active: false, endedReason: "threshold_met" }), null, NOW)).toBeUndefined();
   });
 });
 
-describe("readRunningJob / loopTextForSessions（ファイル）", () => {
+describe("readRunningJob / findLoopsForSession / loopStatusForSessions（ファイル）", () => {
   let dir: string;
   beforeEach(() => {
     dir = fs.mkdtempSync(path.join(os.tmpdir(), "ta-evalloop-"));
@@ -123,105 +139,120 @@ describe("readRunningJob / loopTextForSessions（ファイル）", () => {
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
-  function job(jobsDir: string, name: string, files: Record<string, string>, heartbeatAgeMs?: number): string {
-    const d = path.join(jobsDir, name);
-    fs.mkdirSync(d, { recursive: true });
-    for (const [f, content] of Object.entries(files)) fs.writeFileSync(path.join(d, f), content);
-    if (heartbeatAgeMs !== undefined) {
-      const hb = path.join(d, "heartbeat");
-      fs.writeFileSync(hb, "");
-      const t = new Date(NOW - heartbeatAgeMs);
-      fs.utimesSync(hb, t, t);
-    }
-    return d;
+  /** 進捗ログを置く。ended=true なら PHASE_END 行で閉じる。ageMs = mtime を NOW から遡らせる */
+  function progress(turnsDir: string, name: string, opts: { ended?: boolean; ageMs?: number } = {}): string {
+    fs.mkdirSync(turnsDir, { recursive: true });
+    const p = path.join(turnsDir, name);
+    const lines = ["[17:08:00 +0m00s] generator#000 PHASE_START model=gpt-6-astra effort=xhigh sandbox=workspace-write", "[17:09:00 +1m00s] generator#000 ♥"];
+    if (opts.ended === true) lines.push("[17:20:00 +12m00s] generator#000 PHASE_END rc=0");
+    fs.writeFileSync(p, lines.join("\n") + "\n");
+    const t = new Date(NOW - (opts.ageMs ?? 0));
+    fs.utimesSync(p, t, t);
+    return p;
   }
 
-  it("readRunningJob: 現在イテレーションの exit_code 無し＋heartbeat が 30 秒以内 → running（経過は started_at から）", () => {
-    const jobs = path.join(dir, "jobs");
-    job(jobs, "iter-001-generator", { started_at: String(NOW_S - 65) }, 5_000);
-    expect(readRunningJob(jobs, 1, NOW)).toEqual({ role: "generator", elapsedMs: 65_000 });
+  it("readRunningJob: 現在イテレーションの進捗ログに PHASE_END が無く mtime が新しい → running（役割は plan → generator の順）", () => {
+    const turns = path.join(dir, "turns");
+    progress(turns, "turn-001-generator-progress.log", { ageMs: 5_000 });
+    expect(readRunningJob(turns, 1, NOW)).toMatchObject({ role: "generator" });
+    progress(turns, "turn-001-plan-progress.log", { ageMs: 1_000 });
+    expect(readRunningJob(turns, 1, NOW)).toMatchObject({ role: "plan" });
   });
 
-  it("readRunningJob: exit_code があれば終了扱い／heartbeat が古く started_at も 20 秒超なら running ではない／別イテレーションは見ない", () => {
-    const jobs = path.join(dir, "jobs");
-    job(jobs, "iter-001-generator", { started_at: String(NOW_S - 65), exit_code: "0" }, 1_000);
-    expect(readRunningJob(jobs, 1, NOW)).toBe(null);
-    job(jobs, "iter-002-evaluator", { started_at: String(NOW_S - 300) }, 120_000);
-    expect(readRunningJob(jobs, 2, NOW)).toBe(null);
-    job(jobs, "iter-003-generator", { started_at: String(NOW_S - 10) });
-    expect(readRunningJob(jobs, 3, NOW)).toEqual({ role: "generator", elapsedMs: 10_000 }); // 起動直後の猶予
-    expect(readRunningJob(jobs, 4, NOW)).toBe(null);
+  it("readRunningJob: PHASE_END 済み／mtime が JOB_STALE_MS より古い／別イテレーション／turns 不明 → null", () => {
+    const turns = path.join(dir, "turns");
+    progress(turns, "turn-001-generator-progress.log", { ended: true, ageMs: 1_000 });
+    expect(readRunningJob(turns, 1, NOW)).toBe(null);
+    progress(turns, "turn-002-generator-progress.log", { ageMs: JOB_STALE_MS + 1 });
+    expect(readRunningJob(turns, 2, NOW)).toBe(null);
+    progress(turns, "turn-003-generator-progress.log", { ageMs: JOB_STALE_MS });
+    expect(readRunningJob(turns, 3, NOW)).toMatchObject({ role: "generator" });
+    expect(readRunningJob(turns, 4, NOW)).toBe(null);
     expect(readRunningJob(undefined, 1, NOW)).toBe(null);
     expect(readRunningJob(path.join(dir, "nope"), 1, NOW)).toBe(null);
   });
 
-  it("readRunningJob: generator → evaluator → debate の順に最初の running を返す", () => {
-    const jobs = path.join(dir, "jobs");
-    job(jobs, "iter-000-evaluator", { started_at: String(NOW_S - 30) }, 2_000);
-    job(jobs, "iter-000-debate", { started_at: String(NOW_S - 40) }, 2_000);
-    expect(readRunningJob(jobs, 0, NOW)).toEqual({ role: "evaluator", elapsedMs: 30_000 });
-  });
-
-  function registerLoop(kind: "sessions" | "agents", id: string, stateObj: Record<string, unknown>, stateDirName = id): string {
-    const stateDir = path.join(dir, "states", stateDirName);
+  /** `<base>/.mso/{sessions|agents}/<id>/state.json` を置く（turns_dir は同階層 turns/。プラグインは絶対パスを書く） */
+  function writeState(base: string, kind: "sessions" | "agents", id: string, stateObj: Record<string, unknown>, mtimeAgeMs = 0): string {
+    const stateDir = path.join(base, ".mso", kind, id);
     fs.mkdirSync(stateDir, { recursive: true });
     const stateFile = path.join(stateDir, "state.json");
-    fs.writeFileSync(stateFile, JSON.stringify({ ...stateObj, jobs_dir: path.join(stateDir, "jobs").replace(/\\/g, "/") }));
-    fs.mkdirSync(path.join(dir, "registry", kind), { recursive: true });
-    fs.writeFileSync(path.join(dir, "registry", kind, id), stateFile.replace(/\\/g, "/") + "\n"); // 実物は末尾改行付きの絶対パス 1 行
+    fs.writeFileSync(stateFile, JSON.stringify({ ...stateObj, turns_dir: path.join(stateDir, "turns").replace(/\\/g, "/") }));
+    const t = new Date(NOW - mtimeAgeMs);
+    fs.utimesSync(stateFile, t, t);
     return stateDir;
   }
 
-  it("loopTextForSessions: registry/sessions/<sessionId> からたどって表示文字列を返す（codex ジョブ込み）", () => {
-    const stateDir = registerLoop("sessions", "s1", { ...REAL_STATE, session_id: "s1", iteration: 1, best_score: 78, phase: "generator" });
-    job(path.join(stateDir, "jobs"), "iter-001-generator", { started_at: String(NOW_S - 125) }, 3_000);
-    const m = loopTextForSessions(["s1", "s2"], { evalLoopDir: dir, now: NOW });
-    expect(m.get("s1")).toBe("ループ 2/4・codex 実装中 2分・最高 78点");
+  it("直列ループ: <cwd>/.mso/sessions/<sid>/state.json を読み、codex ジョブ込みの表示・active・job を返す", () => {
+    const stateDir = writeState(dir, "sessions", "s1", { ...REAL_STATE, session_id: "s1", iteration: 1, best_score: 78, phase: "generator" }, 60_000);
+    progress(path.join(stateDir, "turns"), "turn-001-generator-progress.log", { ageMs: 3_000 });
+    const m = loopStatusForSessions([{ sessionId: "s1", cwd: dir, projectPath: dir }, { sessionId: "s2", cwd: dir, projectPath: dir }], NOW);
+    expect(m.get("s1")).toMatchObject({ active: true, job: { role: "generator" }, text: "ループ 2/4・codex 実装中 0分・最高 78点" });
+    expect(m.get("s1")?.lastActivityMs).toBe(NOW - 3_000); // 進捗ログの方が state.json より新しい
     expect(m.has("s2")).toBe(false);
   });
 
-  it("loopTextForSessions: fork ループ（registry/agents/<agentId>。state の session_id で対応付け）も拾う", () => {
-    registerLoop("agents", "a6be3bf9a9c1e87d1", { ...REAL_STATE, session_id: "s9", agent_id: "a6be3bf9a9c1e87d1", iteration: 0, phase: "evaluator" });
-    const m = loopTextForSessions(["s9"], { evalLoopDir: dir, now: NOW });
-    expect(m.get("s9")).toBe("ループ 1/4・採点中");
+  it("cwd が無い（再接続復元のみ）セッションはプロジェクトのパスから探す。cwd がサブディレクトリなら cwd 側とプロジェクト側の両方を見る", () => {
+    writeState(dir, "sessions", "s1", { ...REAL_STATE, session_id: "s1", phase: "plan" });
+    expect(loopStatusForSessions([{ sessionId: "s1", projectPath: dir }], NOW).get("s1")?.text).toBe("ループ 1/4・計画中");
+    const sub = path.join(dir, "packages", "web");
+    fs.mkdirSync(sub, { recursive: true });
+    expect(loopStatusForSessions([{ sessionId: "s1", cwd: sub, projectPath: dir }], NOW).get("s1")?.text).toBe("ループ 1/4・計画中");
+    writeState(sub, "sessions", "s3", { ...REAL_STATE, session_id: "s3", phase: "eval" });
+    expect(loopStatusForSessions([{ sessionId: "s3", cwd: sub, projectPath: dir }], NOW).get("s3")?.text).toBe("ループ 1/4・判定中");
   });
 
-  it("loopTextForSessions: 同じセッションに複数ループ → 進行中を優先し「（他 N 本）」を添える。終了のみなら終了表示", () => {
-    registerLoop("sessions", "s1", { ...REAL_STATE, session_id: "s1", active: false, ended_reason: "threshold_met", ended_at: NOW_S - 10, latest_score: 95 });
-    registerLoop("agents", "agent-a", { ...REAL_STATE, session_id: "s1", agent_id: "agent-a", iteration: 2, phase: "plan" }, "agent-a");
-    registerLoop("agents", "agent-b", { ...REAL_STATE, session_id: "s1", agent_id: "agent-b", iteration: 0, phase: "generator" }, "agent-b");
-    const m = loopTextForSessions(["s1"], { evalLoopDir: dir, now: NOW });
-    expect(m.get("s1")).toMatch(/^ループ [13]\/4・(計画中|実装中)（他 1 本）$/);
-    fs.rmSync(path.join(dir, "registry", "agents"), { recursive: true, force: true });
-    expect(loopTextForSessions(["s1"], { evalLoopDir: dir, now: NOW }).get("s1")).toBe("ループ終了・合格 95点");
+  it("fork ループ（.mso/agents/<agentId>。state の session_id で対応付け）も拾う", () => {
+    writeState(dir, "agents", "a6be3bf9a9c1e87d1", { ...REAL_STATE, session_id: "s9", agent_id: "a6be3bf9a9c1e87d1", iteration: 0, phase: "evaluator" });
+    expect(loopStatusForSessions([{ sessionId: "s9", cwd: dir, projectPath: dir }], NOW).get("s9")).toMatchObject({ active: true, job: null, text: "ループ 1/4・採点中" });
   });
 
-  it("loopTextForSessions: registry の中身が無効・state が無い・壊れている・registry 自体が無い → そのセッションは無し（例外を出さない）", () => {
-    fs.mkdirSync(path.join(dir, "registry", "sessions"), { recursive: true });
-    fs.writeFileSync(path.join(dir, "registry", "sessions", "s1"), path.join(dir, "missing", "state.json") + "\n");
-    fs.writeFileSync(path.join(dir, "registry", "sessions", "s2"), "");
-    const broken = path.join(dir, "broken.json");
-    fs.writeFileSync(broken, "{not json");
-    fs.writeFileSync(path.join(dir, "registry", "sessions", "s3"), broken + "\n");
-    const m = loopTextForSessions(["s1", "s2", "s3"], { evalLoopDir: dir, now: NOW });
+  it("同じセッションに複数ループ → 進行中を優先し「（他 N 本）」を添える。終了のみなら終了表示（終了時刻は state.json の mtime）", () => {
+    writeState(dir, "sessions", "s1", { ...REAL_STATE, session_id: "s1", active: false, ended_reason: "threshold_met", latest_score: 95 }, 10_000);
+    writeState(dir, "agents", "agent-a", { ...REAL_STATE, session_id: "s1", agent_id: "agent-a", iteration: 2, phase: "plan" });
+    writeState(dir, "agents", "agent-b", { ...REAL_STATE, session_id: "s1", agent_id: "agent-b", iteration: 0, phase: "generator" });
+    const lookup = [{ sessionId: "s1", cwd: dir, projectPath: dir }];
+    expect(loopStatusForSessions(lookup, NOW).get("s1")?.text).toMatch(/^ループ [13]\/4・(計画中|実装中)（他 1 本）$/);
+    fs.rmSync(path.join(dir, ".mso", "agents"), { recursive: true, force: true });
+    expect(loopStatusForSessions(lookup, NOW).get("s1")).toEqual({ active: false, job: null, text: "ループ終了・合格 95点" });
+  });
+
+  it("summarizeLoops: 30 分より前に終わったループは表示も active も無し（呼び出し側はセッションを結果に含めない）", () => {
+    writeState(dir, "sessions", "s1", { ...REAL_STATE, session_id: "s1", active: false, ended_reason: "cancelled" }, ENDED_SHOW_MS + 1_000);
+    const loops = findLoopsForSession({ sessionId: "s1", cwd: dir, projectPath: dir });
+    expect(loops).toHaveLength(1);
+    expect(summarizeLoops(loops, NOW)).toEqual({ active: false, job: null });
+    expect(loopStatusForSessions([{ sessionId: "s1", cwd: dir, projectPath: dir }], NOW).size).toBe(0);
+  });
+
+  it("task 未設定の active な state（事前作成の残骸）は存在しない扱い: 保持も「（他 N 本）」もバッジも出ない（260908_2）", () => {
+    // 2026-09-09 実測: 終わった直列ループの隣に task="" / iteration 0/12 の agents state が 3 つ残り、
+    // 「ループ 1/12・計画中（他 2 本）」で保持され続けた
+    writeState(dir, "sessions", "s1", { ...REAL_STATE, session_id: "s1", active: false, ended_reason: "threshold_met", latest_score: 91 }, 60_000);
+    for (const a of ["a23e90ad45bf", "a859d90c042c", "aa35d16707f2"]) {
+      writeState(dir, "agents", a, { loop_type: "eval", active: true, iteration: 0, max_iterations: 12, threshold: 70, phase: "plan", task: "", session_id: "s1", agent_id: a });
+    }
+    writeState(dir, "agents", "notset", { loop_type: "eval", active: true, iteration: 0, max_iterations: 12, phase: "plan", task: "task not set", session_id: "s1", agent_id: "notset" });
+    expect(findLoopsForSession({ sessionId: "s1", cwd: dir, projectPath: dir })).toHaveLength(1);
+    expect(loopStatusForSessions([{ sessionId: "s1", cwd: dir, projectPath: dir }], NOW).get("s1")).toEqual({ active: false, job: null, text: "ループ終了・合格 91点" });
+    // task が入った本物の fork ループなら拾う
+    writeState(dir, "agents", "real", { ...REAL_STATE, session_id: "s1", agent_id: "real", phase: "generator" });
+    expect(loopStatusForSessions([{ sessionId: "s1", cwd: dir, projectPath: dir }], NOW).get("s1")).toMatchObject({ active: true, text: "ループ 1/4・実装中" });
+  });
+
+  it("state が無い・壊れている・.mso 自体が無い・区切り文字入りの id → そのセッションは無し（例外を出さない）", () => {
+    const broken = path.join(dir, ".mso", "sessions", "s3");
+    fs.mkdirSync(broken, { recursive: true });
+    fs.writeFileSync(path.join(broken, "state.json"), "{not json");
+    const m = loopStatusForSessions(
+      [
+        { sessionId: "s1", cwd: dir, projectPath: dir },
+        { sessionId: "s3", cwd: dir, projectPath: dir },
+        { sessionId: "../s1", cwd: dir, projectPath: dir },
+        { sessionId: "s1", cwd: path.join(dir, "nowhere"), projectPath: path.join(dir, "nowhere") },
+      ],
+      NOW
+    );
     expect(m.size).toBe(0);
-    expect(loopTextForSessions(["s1"], { evalLoopDir: path.join(dir, "nowhere"), now: NOW }).size).toBe(0);
-  });
-});
-
-describe("evalLoopDir", () => {
-  const saved = process.env.TERMINAL_APP_EVAL_LOOP_DIR;
-  afterEach(() => {
-    if (saved === undefined) delete process.env.TERMINAL_APP_EVAL_LOOP_DIR;
-    else process.env.TERMINAL_APP_EVAL_LOOP_DIR = saved;
-  });
-
-  it("既定は <home>/.claude/eval-loop。env TERMINAL_APP_EVAL_LOOP_DIR で差し替え（空白のみは未設定扱い）", () => {
-    delete process.env.TERMINAL_APP_EVAL_LOOP_DIR;
-    expect(evalLoopDir("C:/Users/x")).toBe(path.join("C:/Users/x", ".claude", "eval-loop"));
-    process.env.TERMINAL_APP_EVAL_LOOP_DIR = "C:/tmp/el";
-    expect(evalLoopDir("C:/Users/x")).toBe("C:/tmp/el");
-    process.env.TERMINAL_APP_EVAL_LOOP_DIR = "  ";
-    expect(evalLoopDir("C:/Users/x")).toBe(path.join("C:/Users/x", ".claude", "eval-loop"));
   });
 });

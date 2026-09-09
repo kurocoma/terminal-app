@@ -42,7 +42,8 @@
 | V-20 アイドル時 CPU 負荷 | — | NFR-07 | 手動計測 | 3.8 |
 | V-21 タイルの D&D 並べ替えと自動整列（260906_1） | AC-19, AC-20 | REQ-15, REQ-16 | 単体（`tests/format-arrange.test.ts`・`tests/project-store-reorder.test.ts`）＋ E2E（CDP・合成 DragEvent） | `scripts/verify-arrange-e2e.mjs` → `docs/evidence/20260906-arrange/` |
 | V-22 作業中の完了・切断誤判定の防止（260907_1） | AC-21 | REQ-17 | 単体（`tests/session-scan-blocked-stop.test.ts`・`tests/liveness-monitor-stopped-resume.test.ts`・`tests/state-store-stopped-resume.test.ts`・`tests/session-registry-env.test.ts`）＋ E2E（擬似登録簿 `TERMINAL_APP_SESSIONS_DIR`・実 hook 形式の注入・transcript 操作） | `scripts/verify-loop-running-e2e.mjs` → `docs/evidence/20260907-loop-running/` |
-| V-23 ループ進捗バッジ（260907_2） | AC-22 | REQ-18 | 単体（`tests/eval-loop-status.test.ts`・`tests/state-store-loop-text.test.ts`）＋ E2E（擬似 eval-loop ディレクトリ `TERMINAL_APP_EVAL_LOOP_DIR` に state.json と codex ジョブを置き、CDP でバッジ文言を確認） | `scripts/verify-loop-badge-e2e.mjs` → `docs/evidence/20260907-loop-badge/` |
+| V-23 ループ進捗バッジ（260907_2。260908_1 で `.mso` 配置へ追従） | AC-22 | REQ-18 | 単体（`tests/eval-loop-status.test.ts`・`tests/state-store-loop-text.test.ts`）＋ E2E（擬似プロジェクトの `.mso/sessions|agents/<id>/state.json` と進捗ログを置き、CDP でバッジ文言を確認） | `scripts/verify-loop-badge-e2e.mjs` → `docs/evidence/20260908-held/` |
+| V-24 作業継続中の保持（260908_1） | AC-22 | REQ-18 | 単体（`tests/state-store-held.test.ts`・`tests/liveness-monitor-held.test.ts`）＋ E2E（ループ進行中の Stop / 入力待ち通知で実行中を維持、許可要求は確認待ち、ループ終了後の Stop で完了、task-notification 起床＋登録簿 `shell` で Stop 後も実行中 → `idle` で終了検知） | `scripts/verify-loop-badge-e2e.mjs` (f)(g) → `docs/evidence/20260908-held/` |
 
 **運用ルール**: spec.md の AC が増減したら本表を必ず同期する（対応の欠落 1 件も不可）。
 

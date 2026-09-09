@@ -1,19 +1,26 @@
 /**
- * eval-loop（品質ループ）の進捗バッジ（260907_2）。
+ * eval-loop（品質ループ）の進捗バッジ（260907_2）と「作業継続中」判定の根拠（260908_1）。
  *
- * 情報源は eval-loop ハーネス v3 がディスクに書く事実だけ:
- * - `~/.claude/eval-loop/registry/{sessions,agents}/<id>` … state.json の絶対パスが 1 行（末尾改行付き）
- * - state.json（schema_version 3。2026-09-07 実測）… active / iteration（0 始まり）/ max_iterations / phase
- *   （plan → generator → evaluator → eval）/ latest_score / best_score / ended_reason / ended_at（epoch 秒）/
- *   session_id / agent_id（fork・parallel ループ）/ jobs_dir
- * - codex ジョブ `jobs/iter-NNN-<role>/` … heartbeat（runner が 5 秒ごと touch、30 秒で stale）/ started_at（epoch 秒）/
- *   exit_code（あれば終了）。ll_job_status と同じ規則（起動 20 秒の猶予）で「走行中」を判定する
+ * 情報源は eval-loop プラグイン v0.2（C:\dev\loopharness\plugins\eval-loop）がディスクに書く事実だけ:
+ * - `<cwd>/.mso/sessions/<session_id>/state.json` … 直列ループ（hook-stop.sh / hook-prompt-submit.sh が参照する正本）
+ * - `<cwd>/.mso/agents/<agent_id>/state.json` … fork・parallel ループ（state の session_id で本体セッションに対応付く）
+ *   （旧 v3 ハーネスの `~/.claude/eval-loop/registry` は廃止済み。2026-09-08 実測: ディレクトリ自体が無い）
+ * - state.json（2026-09-08 実測）… active / iteration（0 始まり）/ max_iterations / phase（plan → generator → eval）/
+ *   latest_score / best_score / ended_reason / session_id / agent_id / turns_dir。ended_at は書かれないため
+ *   終了時刻は state.json の mtime（loop-control.sh が active=false に書き換えた時刻）で代用する
+ * - codex ジョブ `turns/turn-NNN-<plan|generator>-progress.log` … codex-common.sh の codex_exec_progress が
+ *   PHASE_START 行で始め、無音 60 秒ごとに ♥ 行、PHASE_END 行で必ず閉じる。「走行中」= PHASE_END が無く
+ *   mtime が JOB_STALE_MS 以内
+ * - **task 未設定の state は無視する（260908_2）**: プラグインの SubagentStart hook は全 subagent に active=true の
+ *   state を事前作成し、ループを使わない subagent のものは誰も閉じない（SubagentStop は Task 起動で確実には
+ *   発火しない — anthropics/claude-code#27755。プラグインの never_started GC は UserPromptSubmit 時のみ）。
+ *   2026-09-09 実測: 終わったループの隣に task="" / iteration 0/12 の残骸が 3 つ残り、タイルが回り続けた。
+ *   loop-control.sh と同じ規則（task が空 or "task not set" = ループ未開始）で除外する
  *
  * 表示は 1 行: 「ループ 2/4・codex 実装中 1分・最高 78点」（周回数は 1 始まり）。終了後は ENDED_SHOW_MS の間だけ
  * 「ループ終了・合格 92点」。LLM の自己申告に依存せず、読めない・壊れているものは黙って無視する（バッジ無し）。
  */
 import * as fs from "fs";
-import * as os from "os";
 import * as path from "path";
 
 export interface LoopState {
@@ -26,29 +33,47 @@ export interface LoopState {
   latestScore?: number;
   bestScore?: number;
   endedReason?: string;
-  /** epoch 秒（loop-lib の ll_now） */
+  /** epoch 秒。state.json に ended_at があればそれ、無ければ active=false の state.json の mtime */
   endedAt?: number;
   sessionId?: string;
   agentId?: string;
-  jobsDir?: string;
+  /** codex ジョブの進捗ログが置かれる turns ディレクトリ（state.json の turns_dir。無ければ state.json と同階層の turns/） */
+  turnsDir?: string;
+  /** state.json の mtime（epoch ms。ファイル由来のときだけ。停滞判定に使う） */
+  mtimeMs?: number;
+  /** task が設定済み（= ループが実際に始まっている）。未設定は SubagentStart の事前作成 state の残骸（260908_2） */
+  hasTask: boolean;
 }
 
 export interface RunningJob {
-  role: "generator" | "evaluator" | "debate";
+  role: "plan" | "generator";
   elapsedMs: number;
+}
+
+/** 1 セッション分のループ状況（バッジ文言＋作業継続中判定の材料） */
+export interface LoopStatus {
+  /** バッジ文言（進行中・終了後 30 分）。無ければ undefined */
+  text?: string;
+  /** 進行中のループがあるか */
+  active: boolean;
+  /** 走行中の codex ジョブ（進行中ループの現在イテレーション） */
+  job: RunningJob | null;
+  /** ループ側の最終活動時刻（epoch ms）= state.json / 進捗ログの新しい方。停滞判定用 */
+  lastActivityMs?: number;
 }
 
 /** ループ終了後にバッジを出し続ける時間（30 分） */
 export const ENDED_SHOW_MS = 30 * 60_000;
-/** codex ジョブの heartbeat がこれより古ければ走行中とみなさない（loop-lib.sh LL_HEARTBEAT_STALE=30 秒） */
-const HEARTBEAT_STALE_MS = 30_000;
-/** 起動直後（heartbeat も pid もまだ無い）の猶予（ll_job_status と同じ 20 秒） */
-const STARTUP_GRACE_MS = 20_000;
-const JOB_ROLES: ReadonlyArray<RunningJob["role"]> = ["generator", "evaluator", "debate"];
-/** registry/agents の走査上限（暴走した登録の掃除は loop-start.sh の 14 日 prune に任せる） */
+/** codex ジョブの進捗ログがこれより古ければ走行中とみなさない（ハートビート 60 秒 × 2 ＋余裕） */
+export const JOB_STALE_MS = 150_000;
+/** `.mso/agents` の走査上限（残骸 state の掃除はプラグイン側の hook に任せる） */
 const MAX_AGENT_ENTRIES = 200;
+const JOB_ROLES: ReadonlyArray<RunningJob["role"]> = ["plan", "generator"];
+/** 進捗ログ末尾の走査量（PHASE_END 行の有無を見るには末尾だけで足りる） */
+const PROGRESS_TAIL_BYTES = 4096;
 
 const PHASE_LABEL: Record<string, string> = { plan: "計画中", generator: "実装中", evaluator: "採点中", eval: "判定中" };
+const JOB_LABEL: Record<RunningJob["role"], string> = { plan: "計画中", generator: "実装中" };
 const REASON_LABEL: Record<string, string> = {
   threshold_met: "合格",
   max_iterations: "上限到達",
@@ -57,13 +82,6 @@ const REASON_LABEL: Record<string, string> = {
   invalid_eval_output: "採点不能",
 };
 
-/** eval-loop のホーム（既定 ~/.claude/eval-loop）。env `TERMINAL_APP_EVAL_LOOP_DIR` で差し替え可能（E2E 用） */
-export function evalLoopDir(homeDir: string = os.homedir()): string {
-  const override = process.env.TERMINAL_APP_EVAL_LOOP_DIR;
-  if (override !== undefined && override.trim() !== "") return override;
-  return path.join(homeDir, ".claude", "eval-loop");
-}
-
 function num(v: unknown): number | undefined {
   return typeof v === "number" && Number.isFinite(v) ? v : undefined;
 }
@@ -71,8 +89,11 @@ function str(v: unknown): string | undefined {
   return typeof v === "string" && v !== "" ? v : undefined;
 }
 
-/** state.json の本文 → 表示に要る項目。active が boolean でない・JSON でないものは null */
-export function parseLoopState(text: string): LoopState | null {
+/**
+ * state.json の本文 → 表示に要る項目。active が boolean でない・JSON でないものは null。
+ * fileMtimeMs を渡すと mtimeMs に載せ、active=false で ended_at が無いときの endedAt にも使う
+ */
+export function parseLoopState(text: string, fileMtimeMs?: number): LoopState | null {
   let raw: unknown;
   try {
     raw = JSON.parse(text);
@@ -84,10 +105,12 @@ export function parseLoopState(text: string): LoopState | null {
   if (typeof r.active !== "boolean") return null;
   const iteration = num(r.iteration);
   const max = num(r.max_iterations);
+  const task = str(r.task);
   const s: LoopState = {
     active: r.active,
     iteration: iteration !== undefined && iteration >= 0 ? Math.floor(iteration) : 0,
     maxIterations: max !== undefined && max > 0 ? Math.floor(max) : 12, // loop-control.sh の既定
+    hasTask: task !== undefined && task.trim() !== "" && task !== "task not set",
   };
   const phase = str(r.phase);
   if (phase !== undefined) s.phase = phase;
@@ -101,12 +124,14 @@ export function parseLoopState(text: string): LoopState | null {
   if (reason !== undefined) s.endedReason = reason;
   const endedAt = num(r.ended_at);
   if (endedAt !== undefined) s.endedAt = endedAt;
+  else if (!s.active && fileMtimeMs !== undefined) s.endedAt = Math.floor(fileMtimeMs / 1000);
   const sessionId = str(r.session_id);
   if (sessionId !== undefined) s.sessionId = sessionId;
   const agentId = str(r.agent_id);
   if (agentId !== undefined) s.agentId = agentId;
-  const jobsDir = str(r.jobs_dir);
-  if (jobsDir !== undefined) s.jobsDir = jobsDir;
+  const turnsDir = str(r.turns_dir);
+  if (turnsDir !== undefined) s.turnsDir = turnsDir;
+  if (fileMtimeMs !== undefined) s.mtimeMs = fileMtimeMs;
   return s;
 }
 
@@ -117,56 +142,81 @@ function mtimeMs(p: string): number | null {
     return null;
   }
 }
-function readEpochSeconds(p: string): number | undefined {
+
+/** 進捗ログの末尾に PHASE_END 行があるか（読めなければ「ある」= 走行中扱いしない安全側） */
+function progressLogEnded(p: string): boolean {
+  let fd: number;
   try {
-    const v = Number(fs.readFileSync(p, "utf8").trim());
-    return Number.isFinite(v) && v > 0 ? v : undefined;
+    fd = fs.openSync(p, "r");
   } catch {
-    return undefined;
+    return true;
+  }
+  try {
+    const size = fs.fstatSync(fd).size;
+    const readLen = Math.min(size, PROGRESS_TAIL_BYTES);
+    const buf = Buffer.alloc(readLen);
+    fs.readSync(fd, buf, 0, readLen, size - readLen);
+    return buf.toString("utf8").includes("PHASE_END");
+  } catch {
+    return true;
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+/** 進捗ログ先頭の PHASE_START 行から開始時刻を推定できないため、経過は「ファイル作成時刻」起点（birthtime が無ければ mtime） */
+function startedAtMs(p: string): number | null {
+  try {
+    const st = fs.statSync(p);
+    return st.birthtimeMs > 0 ? st.birthtimeMs : st.mtimeMs;
+  } catch {
+    return null;
   }
 }
 
 /**
- * 現在イテレーションで走行中の codex ジョブ（generator → evaluator → debate の順で最初のもの）。
- * 走行中 = exit_code が無く、heartbeat が 30 秒以内 または started_at から 20 秒未満（起動直後）。
- * 経過は started_at 起点（無ければ heartbeat 起点）。jobs_dir 不明・無しは null
+ * 現在イテレーションで走行中の codex ジョブ（plan → generator の順で最初のもの）。
+ * 走行中 = 進捗ログに PHASE_END が無く、mtime が JOB_STALE_MS 以内。turns_dir 不明・無しは null
  */
-export function readRunningJob(jobsDir: string | undefined, iteration: number, now: number): RunningJob | null {
-  if (jobsDir === undefined) return null;
-  const prefix = `iter-${String(iteration).padStart(3, "0")}-`;
+export function readRunningJob(turnsDir: string | undefined, iteration: number, now: number): RunningJob | null {
+  if (turnsDir === undefined) return null;
+  const prefix = `turn-${String(iteration).padStart(3, "0")}-`;
   for (const role of JOB_ROLES) {
-    const d = path.join(jobsDir, prefix + role);
-    let isDir = false;
-    try {
-      isDir = fs.statSync(d).isDirectory();
-    } catch {
-      isDir = false;
-    }
-    if (!isDir) continue;
-    if (fs.existsSync(path.join(d, "exit_code"))) continue;
-    const startedAt = readEpochSeconds(path.join(d, "started_at"));
-    const hb = mtimeMs(path.join(d, "heartbeat"));
-    const heartbeatFresh = hb !== null && now - hb <= HEARTBEAT_STALE_MS;
-    const justStarted = startedAt !== undefined && now - startedAt * 1000 < STARTUP_GRACE_MS;
-    if (!heartbeatFresh && !justStarted) continue;
-    const elapsedMs = startedAt !== undefined ? Math.max(0, now - startedAt * 1000) : hb !== null ? Math.max(0, now - hb) : 0;
-    return { role, elapsedMs };
+    const p = path.join(turnsDir, `${prefix}${role}-progress.log`);
+    const m = mtimeMs(p);
+    if (m === null || now - m > JOB_STALE_MS) continue;
+    if (progressLogEnded(p)) continue;
+    const started = startedAtMs(p) ?? m;
+    return { role, elapsedMs: Math.max(0, now - started) };
   }
   return null;
 }
 
+/** ループ側の最終活動時刻 = state.json の mtime と現在イテレーションの進捗ログ mtime の新しい方 */
+function loopActivityMs(state: LoopState): number | undefined {
+  let latest = state.mtimeMs;
+  if (state.turnsDir !== undefined) {
+    const prefix = `turn-${String(state.iteration).padStart(3, "0")}-`;
+    for (const role of JOB_ROLES) {
+      const m = mtimeMs(path.join(state.turnsDir, `${prefix}${role}-progress.log`));
+      if (m !== null && (latest === undefined || m > latest)) latest = m;
+    }
+  }
+  return latest;
+}
+
 /**
  * 1 ループの表示文字列。
- * - 進行中: 「ループ N/M・<段階>」（N = iteration+1）。codex ジョブ走行中は段階を「codex 実装中／採点中 <経過分>分」に
+ * - 進行中: 「ループ N/M・<段階>」（N = iteration+1）。codex ジョブ走行中は段階を「codex 計画中／実装中 <経過分>分」に
  *   置き換える。2 周目以降で best_score があれば「・最高 NN点」
- * - 終了: 「ループ終了・<理由> <点数>点」を ended_at から ENDED_SHOW_MS の間だけ。理由は既知のものだけ日本語化
- *   （stalled:* は「停滞で停止」）。never_started（task 未設定のまま掃除された state）と ended_at 無しは出さない
+ * - 終了: 「ループ終了・<理由> <点数>点」を endedAt から ENDED_SHOW_MS の間だけ。理由は既知のものだけ日本語化
+ *   （stalled:* は「停滞で停止」）。never_started（task 未設定のまま掃除された state）と endedAt 無しは出さない
  */
 export function describeLoop(state: LoopState, job: RunningJob | null, now: number): string | undefined {
   if (state.active) {
     const stage =
       job !== null
-        ? `codex ${job.role === "generator" ? "実装中" : "採点中"} ${Math.floor(job.elapsedMs / 60_000)}分`
+        ? `codex ${JOB_LABEL[job.role]} ${Math.floor(job.elapsedMs / 60_000)}分`
         : (PHASE_LABEL[state.phase ?? ""] ?? "進行中");
     let text = `ループ ${state.iteration + 1}/${state.maxIterations}・${stage}`;
     if (state.iteration > 0 && state.bestScore !== undefined) text += `・最高 ${state.bestScore}点`;
@@ -182,77 +232,107 @@ export function describeLoop(state: LoopState, job: RunningJob | null, now: numb
   return text;
 }
 
-/** registry の 1 ファイル（state.json への絶対パス 1 行）をたどって state を読む。読めなければ null */
-function readStateViaRegistry(registryFile: string): { statePath: string; state: LoopState } | null {
-  let statePath: string;
-  try {
-    statePath = fs.readFileSync(registryFile, "utf8").trim();
-  } catch {
-    return null;
-  }
-  if (statePath === "") return null;
+/** state.json を読む。読めない・壊れているときは null。turns_dir が無ければ同階層の turns/ を補う */
+function readStateFile(statePath: string): LoopState | null {
   let text: string;
   try {
     text = fs.readFileSync(statePath, "utf8");
   } catch {
     return null;
   }
-  const state = parseLoopState(text);
-  return state === null ? null : { statePath, state };
+  const m = mtimeMs(statePath);
+  const state = parseLoopState(text, m ?? undefined);
+  if (state === null) return null;
+  if (!state.hasTask) return null; // ループ未開始の事前作成 state（残骸）は存在しないものとして扱う（260908_2）
+  if (state.turnsDir === undefined) state.turnsDir = path.join(path.dirname(statePath), "turns");
+  return state;
 }
 
-/** 同じセッションに複数ループがあるときの 1 行: 進行中を優先（他があれば件数）、無ければ最も新しく終わったもの */
-function describeLoops(loops: readonly LoopState[], now: number): string | undefined {
+/** 検索対象セッション（cwd は hook payload 由来。無ければプロジェクトのパスだけを見る） */
+export interface LoopLookupSession {
+  sessionId: string;
+  cwd?: string;
+  projectPath: string;
+}
+
+/** `.mso` を探す基点（cwd とプロジェクトルート。重複は除く） */
+function baseDirsOf(s: LoopLookupSession): string[] {
+  const out: string[] = [];
+  for (const d of [s.cwd, s.projectPath]) {
+    if (d === undefined || d === "") continue;
+    const n = path.resolve(d);
+    if (!out.some((x) => x.toLowerCase() === n.toLowerCase())) out.push(n);
+  }
+  return out;
+}
+
+/** セッションに対応するループ state をすべて集める（直列 = sessions/<sid>、fork = agents/* の session_id 一致） */
+export function findLoopsForSession(s: LoopLookupSession): LoopState[] {
+  if (!/^[A-Za-z0-9._-]+$/.test(s.sessionId)) return []; // hook 側と同じ規則: 区切り文字を含む id はたどらない
+  const out: LoopState[] = [];
+  const seen = new Set<string>();
+  const add = (statePath: string, state: LoopState): void => {
+    const key = statePath.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push(state);
+  };
+  for (const base of baseDirsOf(s)) {
+    const mso = path.join(base, ".mso");
+    const serial = path.join(mso, "sessions", s.sessionId, "state.json");
+    const st = readStateFile(serial);
+    if (st !== null) add(serial, st);
+    const agentsDir = path.join(mso, "agents");
+    let names: string[] = [];
+    try {
+      names = fs.readdirSync(agentsDir);
+    } catch {
+      names = [];
+    }
+    for (const name of names.slice(0, MAX_AGENT_ENTRIES)) {
+      const p = path.join(agentsDir, name, "state.json");
+      const a = readStateFile(p);
+      if (a !== null && a.sessionId === s.sessionId) add(p, a);
+    }
+  }
+  return out;
+}
+
+/** 同じセッションに複数ループがあるときの状況: 進行中を優先（他があれば件数）、無ければ最も新しく終わったもの */
+export function summarizeLoops(loops: readonly LoopState[], now: number): LoopStatus {
   const active = loops.filter((s) => s.active);
   if (active.length > 0) {
     const s = active[0];
-    const text = describeLoop(s, readRunningJob(s.jobsDir, s.iteration, now), now);
-    if (text === undefined) return undefined;
-    return active.length > 1 ? `${text}（他 ${active.length - 1} 本）` : text;
+    const job = readRunningJob(s.turnsDir, s.iteration, now);
+    const text = describeLoop(s, job, now);
+    let lastActivityMs: number | undefined;
+    for (const a of active) {
+      const m = loopActivityMs(a);
+      if (m !== undefined && (lastActivityMs === undefined || m > lastActivityMs)) lastActivityMs = m;
+    }
+    const status: LoopStatus = { active: true, job, lastActivityMs };
+    if (text !== undefined) status.text = active.length > 1 ? `${text}（他 ${active.length - 1} 本）` : text;
+    return status;
   }
   const ended = loops.filter((s) => s.endedAt !== undefined).sort((a, b) => (b.endedAt ?? 0) - (a.endedAt ?? 0));
   for (const s of ended) {
     const text = describeLoop(s, null, now);
-    if (text !== undefined) return text;
+    if (text !== undefined) return { active: false, job: null, text };
   }
-  return undefined;
+  return { active: false, job: null };
 }
 
 /**
- * 指定セッション群のループ進捗バッジ文言。registry/sessions/<sessionId> と registry/agents/*（state の session_id で
- * 対応付け）の両方を見る。読めない・壊れている・対応する state が無いセッションは結果に含めない（例外は投げない）
+ * 指定セッション群のループ状況。読めない・壊れている・対応する state が無いセッションは結果に含めない（例外は投げない）
  */
-export function loopTextForSessions(sessionIds: readonly string[], deps: { evalLoopDir: string; now: number }): Map<string, string> {
-  const wanted = new Set(sessionIds);
-  const loops = new Map<string, LoopState[]>();
-  const seenPaths = new Set<string>();
-  const add = (sid: string, hit: { statePath: string; state: LoopState }): void => {
-    if (seenPaths.has(hit.statePath)) return;
-    seenPaths.add(hit.statePath);
-    const list = loops.get(sid) ?? [];
-    list.push(hit.state);
-    loops.set(sid, list);
-  };
-  for (const sid of wanted) {
-    if (!/^[A-Za-z0-9._-]+$/.test(sid)) continue; // registry のファイル名規則（ll_safe_id）外はたどらない
-    const hit = readStateViaRegistry(path.join(deps.evalLoopDir, "registry", "sessions", sid));
-    if (hit !== null) add(sid, hit);
-  }
-  const agentsDir = path.join(deps.evalLoopDir, "registry", "agents");
-  let names: string[] = [];
-  try {
-    names = fs.readdirSync(agentsDir);
-  } catch {
-    names = [];
-  }
-  for (const name of names.slice(0, MAX_AGENT_ENTRIES)) {
-    const hit = readStateViaRegistry(path.join(agentsDir, name));
-    if (hit !== null && hit.state.sessionId !== undefined && wanted.has(hit.state.sessionId)) add(hit.state.sessionId, hit);
-  }
-  const out = new Map<string, string>();
-  for (const [sid, list] of loops) {
-    const text = describeLoops(list, deps.now);
-    if (text !== undefined) out.set(sid, text);
+export function loopStatusForSessions(sessions: readonly LoopLookupSession[], now: number): Map<string, LoopStatus> {
+  const out = new Map<string, LoopStatus>();
+  for (const s of sessions) {
+    if (out.has(s.sessionId)) continue;
+    const loops = findLoopsForSession(s);
+    if (loops.length === 0) continue;
+    const status = summarizeLoops(loops, now);
+    if (status.active || status.text !== undefined) out.set(s.sessionId, status);
   }
   return out;
 }

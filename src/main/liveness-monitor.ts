@@ -14,7 +14,16 @@
  *   短い閾値側は「両方成立」を要求して誤検知を抑える。
  * - 登録簿 status が busy のセッションは切断しない（260907_1 R4。同期 fork・codex 待ちで本体 transcript が
  *   長く止まっても Claude Code 自身は「作業中」と申告している）。
+ * - 作業継続中の保持（260908_1）: 呼び出し側が「品質ループ進行中」「バックグラウンド作業の完了待ち」と判定した
+ *   セッション（heldReason が文字列を返す）は、終了検知・切断検知の対象外にし、完了・切断・確認待ち（許可要求以外）から
+ *   実行中へ戻す。判定の根拠は index.ts 側（eval-loop の state.json / task-notification 起床＋登録簿 status）。
  */
+
+/**
+ * 作業継続中の保持判定（260908_1）。文字列 = 保持する理由（ログ・作業テキスト用）、undefined = 保持しない。
+ * 省略時は従来どおり（保持なし）
+ */
+export type HeldReasonFn = (sessionId: string) => string | undefined;
 
 export interface SweepTarget {
   sessionId: string;
@@ -30,6 +39,8 @@ export interface SweepDeps {
   windowPresent(projectId: string): boolean | null;
   /** Claude Code の登録簿 status（busy / waiting / idle）。省略・undefined なら従来どおり transcript のみで判定（260907_1 R4） */
   registryStatus?(sessionId: string): string | undefined;
+  /** 作業継続中の保持（260908_1）。保持中は切断しない */
+  heldReason?: HeldReasonFn;
 }
 
 /** 検証用の env 上書き（--demo / TERMINAL_APP_DATA_DIR と同系の検証フラグ。実運用では未設定 = 既定値） */
@@ -71,6 +82,8 @@ export const BLOCKED_STOP_MARGIN_MS = 2_000;
 export interface ConfirmTarget extends SweepTarget {
   /** 確認待ちへ遷移したイベントの時刻（epoch ms） */
   lastEventAt: number;
+  /** 確認待ちの種別（Notification の分類。260908_1: permission = 本当に人の許可が要る。無指定は other 扱い） */
+  kind?: "permission" | "idle" | "other";
 }
 
 export interface ConfirmResumeDeps {
@@ -79,12 +92,21 @@ export interface ConfirmResumeDeps {
   mtimeMs(path: string): number | null;
   /** Claude Code の登録簿 status（busy / waiting / idle）。無ければ undefined（session-registry.registryStatusOf を注入） */
   registryStatus(sessionId: string): string | undefined;
+  /** 作業継続中の保持（260908_1）。許可要求（permission）以外の確認待ちは保持中なら実行中へ戻す */
+  heldReason?: HeldReasonFn;
+  /**
+   * transcript 終端の分類（session-scan.turnEndOf を注入。260909_1）。渡した場合、transcript 更新による復帰は
+   * 終端が open（本当にターンが始まった）のときだけにする。メタ・ローカルコマンドの書き込みで復帰しないため
+   */
+  turnEnd?(path: string): "concluded" | "open" | "unknown";
 }
 
 export interface ConfirmResumeHit {
   target: ConfirmTarget;
-  /** 何を根拠に復帰させたか（ログ用）: 登録簿が busy / transcript が通知後に更新 */
-  reason: "registry" | "transcript";
+  /** 何を根拠に復帰させたか（ログ用）: 登録簿が busy / transcript が通知後に更新 / 作業継続中の保持 */
+  reason: "registry" | "transcript" | "held";
+  /** reason=held のとき: 保持の理由 */
+  heldReason?: string;
 }
 
 /**
@@ -103,6 +125,15 @@ export function findResumedFromConfirm(targets: readonly ConfirmTarget[], deps: 
   const out: ConfirmResumeHit[] = [];
   const now = deps.now();
   for (const t of targets) {
+    // 保持中（260908_1）: 入力待ち通知（idle）等はループ・バックグラウンド作業の最中にも来るので確認待ちにしない。
+    // 許可要求は人が応えるまで確認待ちのまま（猶予も待たない = 通知の直後でも戻す）
+    if (t.kind !== "permission") {
+      const held = deps.heldReason?.(t.sessionId);
+      if (held !== undefined) {
+        out.push({ target: t, reason: "held", heldReason: held });
+        continue;
+      }
+    }
     if (now - t.lastEventAt < CONFIRM_RESUME_MIN_AGE_MS) continue;
     if (deps.registryStatus(t.sessionId) === "busy") {
       out.push({ target: t, reason: "registry" });
@@ -111,7 +142,40 @@ export function findResumedFromConfirm(targets: readonly ConfirmTarget[], deps: 
     if (t.transcriptPath === undefined) continue;
     const mtime = deps.mtimeMs(t.transcriptPath);
     if (mtime === null) continue;
-    if (mtime >= t.lastEventAt + CONFIRM_RESUME_MARGIN_MS) out.push({ target: t, reason: "transcript" });
+    if (mtime < t.lastEventAt + CONFIRM_RESUME_MARGIN_MS) continue;
+    // 260909_1: 更新がターン開始（許可後のツール結果・プロンプト）でなければ復帰しない。2026-09-09 実測: 入力待ちのまま
+    // /effort /model を打つと transcript が動き、実行中へ戻って 15 分後に「切断」になった
+    if (deps.turnEnd !== undefined && deps.turnEnd(t.transcriptPath) !== "open") continue;
+    out.push({ target: t, reason: "transcript" });
+  }
+  return out;
+}
+
+export interface IdleConcludedDeps {
+  now(): number;
+  /** 最終活動時刻（session-scan.activityMtimeMs を注入）。取得不可は null */
+  mtimeMs(path: string): number | null;
+  /** Claude Code の登録簿 status */
+  registryStatus(sessionId: string): string | undefined;
+  /** 作業継続中の保持（260908_1）。保持中は対象外 */
+  heldReason?: HeldReasonFn;
+}
+
+/**
+ * 待機中の取り残し検知（260909_1）: 「実行中」なのに Claude Code の登録簿が idle と申告し、transcript が
+ * TRANSCRIPT_STALE_MS 以上動いていないセッション。プロセスは生きて入力待ちなので「切断」ではなく「完了」へ倒す。
+ * 背景: 終端分類が open のまま（メタ・ローカルコマンド等）だと終了検知が効かず、15 分後に切断へ誤って倒れていた。
+ * 登録簿 status が無い（Cursor 起動）・busy / shell / waiting は対象外（従来の判定に任せる）
+ */
+export function findIdleConcluded(targets: readonly SweepTarget[], deps: IdleConcludedDeps): SweepTarget[] {
+  const out: SweepTarget[] = [];
+  for (const t of targets) {
+    if (t.transcriptPath === undefined) continue;
+    if (deps.registryStatus(t.sessionId) !== "idle") continue;
+    if (deps.heldReason?.(t.sessionId) !== undefined) continue;
+    const mtime = deps.mtimeMs(t.transcriptPath);
+    if (mtime === null) continue;
+    if (deps.now() - mtime >= TRANSCRIPT_STALE_MS) out.push(t);
   }
   return out;
 }
@@ -140,14 +204,18 @@ export interface StoppedResumeDeps {
   blockedStop(path: string, sinceMs: number): BlockedStop | null;
   /** 本体 transcript と subagent 記録の新しい方の mtime（session-scan.activityMtimeMs を注入）。取得不可は null */
   activityMtimeMs(path: string): number | null;
+  /** 作業継続中の保持（260908_1）。保持中の完了・切断は実行中へ戻す */
+  heldReason?: HeldReasonFn;
 }
 
 export interface StoppedResumeHit {
   target: StoppedTarget;
-  /** 何を根拠に復帰させたか（ログ用）: 登録簿が busy / Stop hook が続行を指示 / 切断後に transcript 更新 */
-  reason: "registry" | "blocked-stop" | "transcript";
+  /** 何を根拠に復帰させたか（ログ用）: 登録簿が busy / Stop hook が続行を指示 / 切断後に transcript 更新 / 作業継続中の保持 */
+  reason: "registry" | "blocked-stop" | "transcript" | "held";
   /** reason=blocked-stop のとき: block 理由（作業テキストのラベルに使う） */
   blockReason?: string;
+  /** reason=held のとき: 保持の理由 */
+  heldReason?: string;
 }
 
 /**
@@ -170,6 +238,12 @@ export function findResumedFromStopped(targets: readonly StoppedTarget[], deps: 
   const out: StoppedResumeHit[] = [];
   const now = deps.now();
   for (const t of targets) {
+    // 保持中（260908_1）: ループ進行中・バックグラウンド作業の完了待ちなら猶予を待たず実行中へ戻す
+    const held = deps.heldReason?.(t.sessionId);
+    if (held !== undefined) {
+      out.push({ target: t, reason: "held", heldReason: held });
+      continue;
+    }
     if (now - t.lastEventAt < STOPPED_RESUME_MIN_AGE_MS) continue;
     if (deps.registryStatus(t.sessionId) === "busy") {
       if (t.transcriptPath === undefined || deps.turnEnd(t.transcriptPath) !== "concluded") {
@@ -197,6 +271,8 @@ export interface ConcludedSweepDeps {
   mtimeMs(path: string): number | null;
   /** transcript 終端の分類（session-scan.turnEndOf を注入。concluded 以外は対象外） */
   turnEnd(path: string): "concluded" | "open" | "unknown";
+  /** 作業継続中の保持（260908_1）。保持中は終了検知しない（Monitor 起床のたびにターンが閉じるため） */
+  heldReason?: HeldReasonFn;
 }
 
 /**
@@ -212,6 +288,7 @@ export function findConcluded(targets: readonly SweepTarget[], deps: ConcludedSw
   const out: SweepTarget[] = [];
   for (const t of targets) {
     if (t.transcriptPath === undefined) continue; // 実データが無ければ判定しない（安全側）
+    if (deps.heldReason?.(t.sessionId) !== undefined) continue; // 作業継続中の保持（260908_1）
     const mtime = deps.mtimeMs(t.transcriptPath);
     if (mtime === null) continue;
     if (deps.now() - mtime < CONCLUDED_MIN_AGE_MS) continue; // 直後は Stop が配送中かもしれない
@@ -228,7 +305,10 @@ export function findDisconnected(targets: readonly SweepTarget[], deps: SweepDep
   const out: SweepTarget[] = [];
   for (const t of targets) {
     if (t.transcriptPath === undefined) continue; // 実データが無ければ判定しない（安全側）
-    if (deps.registryStatus?.(t.sessionId) === "busy") continue; // 登録簿が作業中と申告している間は切断しない（260907_1 R4）
+    const status = deps.registryStatus?.(t.sessionId);
+    if (status === "busy") continue; // 登録簿が作業中と申告している間は切断しない（260907_1 R4）
+    if (status === "idle") continue; // 生きて入力待ち = 切断ではない（260909_1。findIdleConcluded が「完了」へ倒す）
+    if (deps.heldReason?.(t.sessionId) !== undefined) continue; // 作業継続中の保持（260908_1）
     const mtime = deps.mtimeMs(t.transcriptPath);
     if (mtime === null) continue; // stat 失敗（消失・権限）も安全側 — 一時的な失敗で切断を誤宣言しない
     const age = deps.now() - mtime;

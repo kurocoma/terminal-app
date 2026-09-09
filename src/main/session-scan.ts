@@ -47,6 +47,17 @@ export type TurnEndState = "concluded" | "open" | "unknown";
 /** 割り込み時に transcript へ記録されるマーカー（2026-07-12 実測: "[Request interrupted by user for tool use]" 等） */
 const INTERRUPT_MARKER = "[Request interrupted";
 
+/**
+ * ローカルコマンド（/effort /model /clear 等。LLM のターンを起こさない）の痕跡（260909_1）。
+ * 2026-09-09 実測: `<local-command-caveat>…` / `<command-name>/effort</command-name>…` / `<local-command-stdout>…` の
+ * user レコード 3 件が並んで書かれる。ターン開始ではないので終端分類では読み飛ばす
+ * （これを「open」と誤読すると、入力待ちのセッションが実行中扱いになり 15 分後に「切断」へ倒れる）
+ */
+function isLocalCommandRecord(text: string): boolean {
+  const t = text.trimStart();
+  return t.startsWith("<local-command-") || t.startsWith("<command-name>") || t.startsWith("<command-message>");
+}
+
 /** レコード先頭の text（string content または最初の text ブロック）。無ければ undefined */
 function firstTextOf(rec: Record<string, unknown>): string | undefined {
   const message = rec.message as Record<string, unknown> | undefined;
@@ -94,8 +105,9 @@ export function classifyTurnEnd(records: ReadonlyArray<Record<string, unknown>>)
       continue; // local_command 等の system メタはスキップ
     }
     if (type === "user") {
-      if (sawTurnDuration) return "concluded";
       const text = firstTextOf(rec);
+      if (text !== undefined && isLocalCommandRecord(text)) continue; // ローカルコマンドの痕跡はターンではない（260909_1）
+      if (sawTurnDuration) return "concluded";
       if (text !== undefined && text.trim().startsWith(INTERRUPT_MARKER)) return "concluded";
       return "open"; // プロンプト・tool_result はターン開始直後/進行中
     }

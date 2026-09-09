@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>terminal-app 260909_1（入力待ちの誤「切断」防止・SessionStart で前セッションの表示を消す） — 作業完了ダッシュボード</title>
-<!-- dashboard-meta {"schema":"completion-dashboard-meta/2","created":"2026-09-09T12:48:00+0900","subject":"terminal-app 260909_1（入力待ちの誤「切断」防止・SessionStart で前セッションの表示を消す）","type":"実装完了","state":"完了","score":87,"open_tasks":2,"blockers":0,"model":"claude-fable-5-1"} -->
+<title>terminal-app 260908_1（作業継続中の保持・誤トースト停止・ループ状態の .mso 追従） — 作業完了ダッシュボード</title>
+<!-- dashboard-meta {"schema":"completion-dashboard-meta/2","created":"2026-09-08T19:27:55+0900","subject":"terminal-app 260908_1（作業継続中の保持・誤トースト停止・ループ状態の .mso 追従）","type":"実装完了","state":"完了","score":90,"open_tasks":2,"blockers":0,"model":"claude-fable-5-1"} -->
 <style>
   :root { --bg:#f6f7f9; --card:#ffffff; --text:#1f2937; --muted:#6b7280; --border:#e5e7eb;
           --ok:#166534; --warn:#92400e; --bad:#991b1b; --info:#1d4ed8; --focus-bg:#fefce8; }
@@ -112,14 +112,14 @@
   }
 </style>
 </head>
-<body data-dashid="2026-09-09T12:48:00+0900" data-subject="terminal-app 260909_1（入力待ちの誤「切断」防止・SessionStart で前セッションの表示を消す）">
+<body data-dashid="2026-09-08T19:27:55+0900" data-subject="terminal-app 260908_1（作業継続中の保持・誤トースト停止・ループ状態の .mso 追従）">
 <main>
   <header>
-    <h1>terminal-app 260909_1（入力待ちの誤「切断」防止・SessionStart で前セッションの表示を消す） — 作業完了ダッシュボード</h1>
+    <h1>terminal-app 260908_1（作業継続中の保持・誤トースト停止・ループ状態の .mso 追従） — 作業完了ダッシュボード</h1>
     <div class="meta">
       <span class="status info">種別: 実装完了</span>
-      作成日時: 2026-09-09 12:48 / 作成AI（この報告を書いたAIのモデルID）: <code>claude-fable-5-1</code> /
-      ブランチ（作業用の枝分かれ名）: main / commit（変更の保存記録）: e82634d
+      作成日時: 2026-09-08 19:27 / 作成AI（この報告を書いたAIのモデルID）: <code>claude-fable-5-1</code> /
+      ブランチ（作業用の枝分かれ名）: main / commit（変更の保存記録）: c50362f
     </div>
   </header>
 
@@ -127,22 +127,22 @@
     <h2>0. サマリー</h2>
     <div class="chips">
       <span class="status ok">完了状態: 完了</span>
-      <span class="status ok">自己採点: 87/100</span>
-      <span class="status ok">報告の確かさ: 高（実ログで原因特定・単体490件）</span>
+      <span class="status ok">自己採点: 90/100</span>
+      <span class="status ok">報告の確かさ: 高（単体475件・実機E2E 31項目を実測）</span>
       <span class="status ok">ブロッカー: なし</span>
     </div>
     <div class="summary-list">
       <div class="summary-item"><strong>結論</strong>
-        <p>instagram-app が「切断」になった原因は 2 段階でした。入力待ち中に打った <code>/effort</code> <code>/model</code>（ローカルコマンド）の記録をターン開始と誤読して「実行中」に戻り、15 分後に「切断」へ倒れたこと。その後 Claude Code を再起動しても、新しいセッションは最初のプロンプトまで何も送ってこないため、前のセッションの「切断・8分前」が残ったことです。どちらも直し、新ビルドで 12:46 に再起動しました。</p></div>
+        <p>品質ループ（eval-loop）の途中で「完了」「確認待ち」のトースト（画面右下の通知）が鳴っていた問題を直しました。ループ進行中・バックグラウンド作業の完了待ちのあいだは、タイルを「実行中」に保ち、通知を出しません。あわせて、出なくなっていたループ進捗バッジ（「ループ 2/4・codex 実装中」の青い表示）も復活しました。新ビルドの terminal-app を 19:27 に起動済みです。</p></div>
       <div class="summary-item"><strong>あなたの対応</strong>
         <span class="status warn">後でよい</span>
-        <p>次に Claude Code を新しく開いたとき、そのフォルダのタイルが「待機」に戻ることを確かめてください（<a href="#sec-1">詳しくは「1. あなたの次のアクション」へ</a>）</p></div>
+        <p>次に品質ループを回したとき、途中でトーストが鳴らないこと・タイルが実行中のままなことを目で確かめてください（<a href="#sec-1">詳しくは「1. あなたの次のアクション」へ</a>）</p></div>
       <div class="summary-item"><strong>目的と今回できたこと</strong>
-        <p>目的: 生きて入力待ちのセッションを「切断」と誤表示しない。再起動後に古い表示を残さない。<br>できたこと: 終端分類の修正、確認待ちからの復帰条件の厳格化、idle のまま止まった実行中を「完了」へ、SessionStart hook の追加（起動時に全プロジェクトへ自動追記）。</p></div>
+        <p>目的: AI（エージェント）が動いているのに terminal-app が「完了」「確認待ち」と誤って知らせるのをやめ、本当に終わったときだけ知らせる。<br>できたこと: 誤判定の原因（Monitor 通知のたびに応答が終わる司令塔セッション）を実ログで特定し、「作業継続中の保持」を実装。ループ終了時には「ループ終了・合格 92点」付きの完了トーストを 1 回だけ出すようにした。</p></div>
     </div>
     <div class="subcard"><h3 style="margin-top:0">画面確認サーバー（ローカルで実際の画面を見るための起動状態）</h3>
       <p><span class="status ok">対象外（画面の変更なし）</span>
-         対象は Electron の常駐アプリで Web サーバーはありません。新ビルドのアプリ本体を 12:46 に起動し直しました。</p>
+         対象は Electron の常駐アプリで Web サーバーはありません。新ビルドのアプリ本体を 19:27 に起動し直しました（PID は未確認）。</p>
       <p>確認する画面: 今回は画面の変更がないため起動していません。挙動はタスクトレイの terminal-app のタイルで確認します。</p>
     </div>
   </section>
@@ -156,11 +156,19 @@
       <tr><th style="width:64px">済</th><th style="width:40px">順</th><th style="width:120px">種別</th><th>やること</th><th>やり方（クリック / コピペ / ボタンで選ぶ）</th></tr>
       <tr><td><label class="check-cell"><input type="checkbox"> 済</label></td><td>1</td>
         <td><span class="status info">後でよい・コピペ</span></td>
-        <td>次に Claude Code を新しく開いたとき、そのフォルダのタイルが「待機」に戻ることを確かめる</td>
-        <td>ログにこの行が出ていれば正常です:<br><code class="copy">findstr /C:"SessionStart" "%APPDATA%\terminal-app\logs\app.log"</code></td></tr>
+        <td>次に品質ループを回したとき、途中でトーストが鳴らないこと・タイルが実行中のままなことを目で確かめる</td>
+        <td>ループ中に動作記録（ログ）で「実行中を維持」が出ていれば正常です。ターミナルで:<br><code class="copy">findstr /C:"実行中を維持" /C:"保持を解除" "%APPDATA%\terminal-app\logs\app.log"</code></td></tr>
       <tr><td><label class="check-cell"><input type="checkbox"> 済</label></td><td>2</td>
+        <td><span class="status warn">ボタンで選ぶ</span></td>
+        <td>ループ終了時のトースト本文に「ループ終了・合格 92点」のような結果を添える仕様でよいか</td>
+        <td><div class="ans" data-q="アクション2" data-multi="0">
+              <button type="button" class="ansbtn" data-v="A">A: このままでよい（結果付きで 1 回通知）（推奨）</button>
+              <button type="button" class="ansbtn" data-v="B">B: 結果は不要（「応答が完了しました」だけ）</button>
+              <button type="button" class="ansbtn leave" data-v="任せる">任せる（推奨案で進める）</button>
+            </div></td></tr>
+      <tr><td><label class="check-cell"><input type="checkbox"> 済</label></td><td>3</td>
         <td><span class="status info">AIに任せる</span></td>
-        <td>残りをAIに任せる</td><td>チャットに「続けて」と返信すると、Obsidian への作業ログ追記とバックアップを続けます</td></tr>
+        <td>残りをAIに任せる</td><td>チャットに「続けて」と返信すると、今日の作業内容の Obsidian ノート保存（依頼済み）を続けます</td></tr>
     </table></div>
   </section>
 
@@ -168,16 +176,10 @@
     <h2>2. 今回の差分・過去の報告</h2>
     <div class="table-wrap"><table>
       <tr><th>区分</th><th>内容</th></tr>
-      <tr><td>前回からの推移</td><td>状態: 完了 → 完了 / 自己採点: 88 → 87 / 残タスク: 2件 → 2件</td></tr>
-      <tr><td>新しく完了</td><td>ローカルコマンドの痕跡の読み飛ばし、確認待ち復帰の open 要件、idle のまま止まった実行中の「完了」化、切断判定の idle 除外、SessionStart hook</td></tr>
-      <tr><td>新しく発生した懸念</td><td>SessionStart は新しいセッションからしか発火しない（今開いているセッションには効かない）</td></tr>
-      <tr><td>解消済み</td><td>前回の「プラグイン側の残骸掃除」は loopharness v0.2.3 で修正済み（プラグイン更新も実施）</td></tr>
-      <tr><td>未変化</td><td>Windows トーストの手動確認枠、ループ停滞ガード 30 分</td></tr>
+      <tr><td>新規テーマ</td><td>前回の報告「260907_2 ループ進捗バッジ＋260907_1」(9月7日) の続きにあたる別作業のため、差分比較はありません。前回作ったバッジは参照先が古くなって出なくなっており、今回の作業で復活させました</td></tr>
     </table></div>
     <h3>過去の報告（履歴）</h3>
     <ul>
-      <li><a href="dashboard-history/run-completion-dashboard-20260909-1053.html">2026-09-09 10:53 — terminal-app 260908_2（残骸 state の無視・通知種別の公式化 — 止まっているのに回り続ける問題）（88点・完了）</a></li>
-      <li><a href="dashboard-history/run-completion-dashboard-20260908-1927.html">2026-09-08 19:27 — terminal-app 260908_1（作業継続中の保持・誤トースト停止・ループ状態の .mso 追従）（90点・完了）</a></li>
       <li><a href="dashboard-history/run-completion-dashboard-20260907-0419.html">2026-09-07 04:19 — terminal-app 260907_2（ループ進捗バッジ）＋ 260907_1（作業中を実行中として扱う）（89点・要確認）</a></li>
     </ul>
   </section>
@@ -186,12 +188,12 @@
     <h2>3. プラン進捗（計画の進み具合）</h2>
     <div class="table-wrap"><table>
       <tr><th>項目</th><th>状態</th><th>根拠・成果物</th></tr>
-      <tr class="focus"><td>原因の特定（app.log・transcript・登録簿）</td><td><span class="status ok">完了</span></td><td>03:14:46Z「確認待ちから復帰 — transcript が更新」の実体が /effort /model の user レコード 3 件。03:30:01Z 切断検知（登録簿 idle）</td></tr>
-      <tr><td>終端分類の修正（ローカルコマンド読み飛ばし）</td><td><span class="status ok">完了</span></td><td><code>src/main/session-scan.ts</code> isLocalCommandRecord</td></tr>
-      <tr><td>確認待ち復帰の条件（終端 open のときだけ）</td><td><span class="status ok">完了</span></td><td><code>src/main/liveness-monitor.ts</code> findResumedFromConfirm（turnEnd 依存を追加）</td></tr>
-      <tr><td>idle のまま止まった実行中を「完了」へ／切断判定の idle 除外</td><td><span class="status ok">完了</span></td><td><code>src/main/liveness-monitor.ts</code> findIdleConcluded・findDisconnected、<code>src/main/index.ts</code> 掃引</td></tr>
-      <tr><td>SessionStart hook（同じフォルダの切断・終了済み表示を消す）</td><td><span class="status ok">完了</span></td><td><code>src/main/hooks-manager.ts</code> SESSION_HOOK_EVENTS、<code>src/main/state-store.ts</code> applyEvent、起動時追補で instagram-app 等の settings.json に追記済み</td></tr>
-      <tr><td>テスト・ドキュメント・再起動</td><td><span class="status ok">完了</span></td><td>490 件 green、E2E 回帰 35 項目 OK、README / design.md / verification-results.md。12:46 再起動</td></tr>
+      <tr><td>原因の特定（ログ・transcript・登録簿の実測）</td><td><span class="status ok">完了</span></td><td><code>%APPDATA%\terminal-app\logs\app.log</code> 08:06〜08:28Z: Monitor 通知の起床 → Stop／終了検知が 30 秒〜1 分ごとに反復。登録簿 status=<code>shell</code>。<code>~/.claude/eval-loop</code> は存在せず</td></tr>
+      <tr class="focus"><td>作業継続中の保持（ループ進行中／バックグラウンド作業待ち）</td><td><span class="status ok">完了</span></td><td><code>src/main/index.ts</code>（heldReasonFor・trackHeld）、<code>src/main/state-store.ts</code>（holdRunning・backgroundDriven）、<code>src/main/liveness-monitor.ts</code>（heldReason 注入）</td></tr>
+      <tr><td>トーストの出し分け（保持中は出さず、解けたときに結果付きで 1 回）</td><td><span class="status ok">完了</span></td><td><code>src/main/index.ts</code> scheduleStopRecheck / showReleasedToast</td></tr>
+      <tr><td>ループ状態の読み取りをプラグイン v0.2 の <code>.mso</code> 配置へ追従</td><td><span class="status ok">完了</span></td><td><code>src/main/eval-loop-status.ts</code> 全面書き換え（sessions/agents・進捗ログ PHASE_END）</td></tr>
+      <tr><td>テスト・E2E・ドキュメント</td><td><span class="status ok">完了</span></td><td>475 件 green、<code>scripts/verify-loop-badge-e2e.mjs</code> 31 項目 OK、README / design.md / verification*.md 更新。commit c50362f</td></tr>
+      <tr><td>稼働アプリへの反映</td><td><span class="status ok">完了</span></td><td>旧プロセス（PID 34160）終了 → 新ビルド起動（19:27 「terminal-app 起動」）</td></tr>
     </table></div>
   </section>
 
@@ -199,18 +201,18 @@
     <h2>4. 残タスク</h2>
     <div class="table-wrap"><table>
       <tr><th>担当</th><th>優先度</th><th>タスク</th><th>理由</th><th>次のアクション</th></tr>
-      <tr><td>あなた（ユーザー）の判断待ち</td><td class="priority-low">低</td><td>次の新規セッションでタイルが待機へ戻ることの目視確認</td><td>SessionStart は新しいセッションからしか発火しない</td><td>セクション 1 の 1 行目</td></tr>
-      <tr><td>AIがこのまま進められる</td><td class="priority-low">低</td><td>Obsidian への作業ログ追記とバックアップ</td><td>今日の 3 件目の修正</td><td>run-obsidian-note → run-obsidian-backup</td></tr>
+      <tr><td>あなた（ユーザー）の判断待ち</td><td class="priority-mid">中</td><td>実ループでの動作確認（トーストが鳴らない・タイルが実行中のまま）</td><td>Windows の通知は自動テストで検証できないため</td><td>次のループ実行時に確認。ログの「実行中を維持」で裏取り</td></tr>
+      <tr><td>AIがこのまま進められる</td><td class="priority-low">低</td><td>今日の作業内容を Obsidian（メモ管理アプリ）に保存</td><td>依頼済み（このダッシュボードの後に実施）</td><td>run-obsidian-note を実行</td></tr>
     </table></div>
   </section>
 
   <section class="card" id="sec-5">
     <h2>5. 自己採点</h2>
-    <div class="score">87<small>/100</small></div>
+    <div class="score">90<small>/100</small></div>
     <ul>
-      <li>−5点: SessionStart の経路は単体テストのみで、実機 E2E は追加していない（検証の十分さ）</li>
-      <li>−4点: ローカルコマンドの痕跡形式は今回の実測（3 レコード）に基づく。Claude Code の版で形が変わる可能性がある（リスク管理）</li>
-      <li>−4点: 同じ機能領域で 3 日連続の修正になっており、当初の設計で入力待ち・再起動の経路を見落としていた（実装・作業品質）</li>
+      <li>−5点: 実ループでのトースト挙動（Windows 通知）は実測できておらず、ログと状態遷移で代替した（検証の十分さ）</li>
+      <li>−3点: 登録簿 status=<code>shell</code> の正確な意味は Claude Code 側の仕様が未公開で、観測事実（バックグラウンド shell が残ると shell になる）に基づく推測を含む（リスク管理）</li>
+      <li>−2点: ループが停滞（司令塔が止まったまま active=true）した場合、最大 30 分は「実行中」表示が続く（要件達成度）</li>
     </ul>
     <p class="muted">配点の観点: 要件達成度30 / 実装・作業品質20 / 検証の十分さ20 / リスク管理15 / 説明の明瞭さ15。
        検証をしていない場合は「検証の十分さ」を高くしません。</p>
@@ -220,9 +222,9 @@
     <h2>6. 懸念事項</h2>
     <div class="table-wrap"><table>
       <tr><th>重要度</th><th>懸念</th><th>影響</th><th>対応案</th></tr>
-      <tr><td class="priority-low">低</td><td>SessionStart が既存セッションには効かない</td><td>今開いているセッションで「切断」が残った場合は、次のプロンプトまで消えない</td><td>タイル右クリック「この枠を消す」で手動で消せる（既存機能）</td></tr>
-      <tr><td class="priority-low">低</td><td>idle のまま 3 分止まった実行中を「完了」にする規則</td><td>Stop 欠落（Esc 割り込み等）の後始末が早くなる一方、登録簿の status 更新が遅れると数分早く完了表示になる</td><td>様子見。誤りが出たらログの「登録簿 status=idle のまま」行を添えて報告</td></tr>
-      <tr><td class="priority-low">低</td><td>ローカルコマンドの痕跡形式の変更</td><td>形が変わると再び「open」誤読が起きうる</td><td>Claude Code 更新後に症状が再発したら transcript の末尾を確認</td></tr>
+      <tr><td class="priority-mid">中</td><td>Claude Code の登録簿 status に <code>shell</code> 以外の新しい値が増える可能性</td><td>idle / waiting 以外はすべて「作業中」と扱うため、未知の値が「待機」を意味する場合は実行中に留まる</td><td>実ログで新しい値を見つけたら <code>backgroundHoldReason</code> の除外リストに追加</td></tr>
+      <tr><td class="priority-low">低</td><td>Claude が開発サーバーなどを background で起動したまま人が待っているケース</td><td>直近のプロンプトが task-notification のときだけ保持するため、人のプロンプト後の Stop は従来どおり完了になる（影響は限定的）</td><td>様子見。誤判定が出たらログを添えて報告</td></tr>
+      <tr><td class="priority-low">低</td><td>ループ停滞ガード（30 分）</td><td>司令塔が死んで state が active のままだと最長 30 分は実行中表示</td><td>プラグイン側の停滞 watchdog と併用。短くしたければ <code>LOOP_HOLD_STALE_MS</code> を調整</td></tr>
     </table></div>
   </section>
 
@@ -232,14 +234,14 @@
        コピーされた文をチャットに貼り付ければ回答完了です。</p>
     <div class="table-wrap"><table>
       <tr><th style="width:48px">番号</th><th style="width:64px">優先度</th><th>確認したいこと</th><th>選択肢（選ぶとどうなるかを添える）</th></tr>
-      <tr><td>1</td><td class="priority-low">低</td><td>SessionStart で消すのは「切断」と「終了済み」だけにしました。「完了」「確認待ち」の古い表示（プロセスは生きている）は残します。この範囲でよいですか</td>
+      <tr><td>1</td><td class="priority-low">低</td><td>許可要求（permission）の通知はループ中でも「確認待ち」＋トーストのままにしています。この扱いでよいですか</td>
         <td>
           <div class="ans" data-q="確認1" data-multi="0">
-            <button type="button" class="ansbtn" data-v="A">A: この範囲でよい（生きているセッションの表示は残す）（推奨）</button>
-            <button type="button" class="ansbtn" data-v="B">B: 新セッション開始で同じフォルダの表示を全部待機に戻す</button>
+            <button type="button" class="ansbtn" data-v="A">A: このままでよい（許可は人が応える必要がある）（推奨）</button>
+            <button type="button" class="ansbtn" data-v="B">B: ループ中は許可要求も通知しない</button>
             <button type="button" class="ansbtn leave" data-v="任せる">任せる（推奨案で進める）</button>
           </div>
-          <span class="muted">同じフォルダで 2 本並行しているとき、片方を開き直しただけで他方の「確認待ち」が消えるのを避けるためです。</span>
+          <span class="muted">bypass 権限で回すループでは許可要求は起きないため、通知が来たときは本当に人の応答が要る場面です。</span>
         </td></tr>
     </table></div>
   </section>
@@ -247,9 +249,9 @@
   <section class="card" id="sec-8">
     <h2>8. 対象外・未対応（今回やっていないこと）</h2>
     <ul>
-      <li>SessionStart 経路の実機 E2E は追加していません（単体テスト 4 件のみ）</li>
-      <li>git push はしていません（main にローカルコミットのみ）</li>
-      <li>loopharness 側の変更はありません（v0.2.3 への更新は別途実施済み）</li>
+      <li>Claude Code 本体のバックグラウンドタスク一覧（Monitor の件数など）を直接読む仕組みは作っていません。ディスクにその記録が見つからなかったため、登録簿 status と通知の痕跡で代用しています</li>
+      <li>eval-loop プラグイン側（<code>C:\dev\loopharness</code>）は変更していません</li>
+      <li>他 PC への配布（git push）はしていません。コミットはローカルの main にあります</li>
     </ul>
   </section>
 
@@ -257,16 +259,24 @@
     <h2>9. 検証・実施ログ</h2>
     <div class="table-wrap"><table>
       <tr><th>項目</th><th style="width:110px">結果</th><th>内容</th><th>確認先（ローカル / 本番）</th></tr>
-      <tr><td>変更ファイル</td><td><span class="status info">12件</span></td><td>src 5 / tests 5（新規 2）/ docs 3 / README</td><td><code>C:\dev\terminal-app</code>（commit e82634d）</td></tr>
-      <tr class="focus"><td>原因の実測</td><td><span class="status ok">成功</span></td><td>transcript 末尾に /effort /model の user レコード 3 件（03:14:43〜48Z）。app.log に「確認待ちから復帰」→ 15 分後「切断検知」。登録簿は idle</td><td><code>C:\Users\tckam\.claude\projects\C--dev-instagram-app\ebc3b526-….jsonl</code> / <code>C:\Users\tckam\AppData\Roaming\terminal-app\logs\app.log</code></td></tr>
-      <tr><td>動作テスト（単体）</td><td><span class="status ok">成功</span></td><td><code>npx vitest run</code>: 56 ファイル / 490 件すべて合格（新規 10 件、既存の期待値変更 2 か所）</td><td><code>C:\dev\terminal-app\tests\liveness-monitor-idle.test.ts</code> / <code>tests\state-store-session-start.test.ts</code></td></tr>
-      <tr><td>動作テスト（実機 E2E 回帰）</td><td><span class="status ok">成功</span></td><td><code>node scripts/verify-loop-badge-e2e.mjs</code>: 35 項目すべて OK（保持・残骸・通知種別の回帰なし）</td><td><code>C:\dev\terminal-app\docs\evidence\20260909-remnant\</code></td></tr>
-      <tr><td>ビルド／コードチェック</td><td><span class="status ok">成功</span></td><td><code>npm run build</code> / <code>npm run typecheck</code> / <code>npm run lint</code>: すべて指摘なし</td><td><code>C:\dev\terminal-app\dist\main\index.js</code></td></tr>
-      <tr><td>稼働アプリ</td><td><span class="status ok">成功</span></td><td>12:46 に新ビルドで再起動。起動時追補で instagram-app の settings.json に SessionStart が追記された</td><td><code>C:\dev\instagram-app\.claude\settings.json</code></td></tr>
-      <tr><td>SessionStart の実機動作</td><td><span class="status warn">未確認</span></td><td>新しい Claude Code セッションを開くまで発火しない</td><td><code>C:\Users\tckam\AppData\Roaming\terminal-app\logs\app.log</code></td></tr>
+      <tr><td>変更ファイル</td><td><span class="status info">18件</span></td><td>src 4 / tests 4 / scripts 1 / docs 4 / evidence 6（新規 png 4・log・json）。README 更新</td><td><code>C:\dev\terminal-app</code>（commit c50362f）</td></tr>
+      <tr class="focus"><td>動作テスト（単体）</td><td><span class="status ok">成功</span></td><td><code>npx vitest run</code>（自動テスト）: 54 ファイル / 475 件すべて合格。新規 14 件（保持の判定・task-notification・.mso 読み取り）</td><td><code>C:\dev\terminal-app\tests\state-store-held.test.ts</code> ほか</td></tr>
+      <tr class="focus"><td>動作テスト（実機 E2E）</td><td><span class="status ok">成功</span></td><td><code>node scripts/verify-loop-badge-e2e.mjs</code>: 実際の Electron を専用設定で起動し、擬似ループ・擬似登録簿でイベントを注入。31 項目すべて OK（ループ中の Stop → 実行中維持、入力待ち通知 → 確認待ちにならない、許可要求 → 確認待ち、ループ終了後の Stop → 完了、task-notification＋shell → 実行中、idle → 完了）</td><td><code>C:\dev\terminal-app\docs\evidence\20260908-held\</code>（result.json・app.log・png 4 枚）</td></tr>
+      <tr><td>ビルド（動く形への変換）</td><td><span class="status ok">成功</span></td><td><code>npm run build</code>（TypeScript を実行できる JavaScript に変換）: exit 0。新ビルドでアプリを再起動済み</td><td><code>C:\dev\terminal-app\dist\main\index.js</code></td></tr>
+      <tr><td>コードチェック（Lint / 型チェック）</td><td><span class="status ok">成功</span></td><td><code>npm run typecheck</code> / <code>npm run lint</code>（書き方と型の整合性の自動チェック）: ともに指摘なし</td><td><code>C:\dev\terminal-app</code></td></tr>
+      <tr><td>稼働アプリでの実ループ確認</td><td><span class="status warn">未確認</span></td><td>再起動後（19:27）にまだ hook イベントが届いておらず、実ループでの「実行中を維持」ログは未観測</td><td><code>C:\Users\tckam\AppData\Roaming\terminal-app\logs\app.log</code></td></tr>
     </table></div>
+    <figure class="shot">
+      <div class="shotwrap">
+        <img src="dashboard_assets/20260908-1927-held-tiles.png" alt="E2E 実行中の terminal-app タイル（ループ進行中の保持）">
+        <span class="pin" style="left:18%;top:30%;">1</span>
+        <span class="pin" style="left:50%;top:30%;">2</span>
+      </div>
+      <figcaption>① loop-a: ループ進行中の Stop を受けた後も「実行中」のままで、名前の下に青いループバッジ（ループ 2/4・codex 実装中）が出ている ② loop-b: fork ループ（採点中）も同様に実行中（画像: <code>dashboard_assets/20260908-1927-held-tiles.png</code>。E2E の擬似プロジェクトで撮影）</figcaption>
+    </figure>
     <details><summary>詳細ログ</summary>
-      <p>実ログ 2026-09-09: 03:08:50Z Notification 種別=idle(idle_prompt) → confirm ／ 03:14:46Z 確認待ちから復帰 — 許可後に transcript が更新 ／ 03:30:01Z 切断検知 — transcript 更新途絶 ／ 03:37:47Z セッション終了を確認（登録簿にプロセスなし）／ 03:37:55Z 再接続: 走査 0 件。</p>
+      <p>発端の実ログ（Pricefluctuation-app, session 632eda45, 2026-09-08 08:06〜08:28Z）: <code>UserPromptSubmit → running</code> と <code>Stop → done</code>／<code>終了検知 … 「完了」へ</code> が 30 秒〜1 分ごとに反復。transcript の user レコードは <code>origin.kind="task-notification"</code>、登録簿は <code>status:"shell"</code>。<code>%USERPROFILE%\.claude\eval-loop</code> は存在せず、実際の state は <code>C:\dev\Pricefluctuation-app\.mso\sessions\632eda45-…\state.json</code>（active=true, phase=plan）。</p>
+      <p>E2E の主要ログ行: 「作業継続中として保持: loop-a … ループ進行中（ループ 2/4・codex 実装中 0分・最高 78点）」「event 受信: Stop → running（実行中を維持: …）」「保持を解除: loop-c … 直前の理由: バックグラウンド作業の完了待ち（登録簿 status=shell）」「終了検知: loop-c …」。</p>
     </details>
   </section>
 </main>

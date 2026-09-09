@@ -26,7 +26,7 @@ describe("confirmSessions", () => {
     store.applyEvent(evt("UserPromptSubmit", "r1"), projects);
     store.applyEvent(evt("Notification", "c2"), projects);
     store.setDead("c2", true);
-    expect(store.confirmSessions()).toEqual([{ sessionId: "c1", projectId: "p1", transcriptPath: "C:/t/c1.jsonl", lastEventAt: 1_000_000 }]);
+    expect(store.confirmSessions()).toEqual([{ sessionId: "c1", projectId: "p1", transcriptPath: "C:/t/c1.jsonl", lastEventAt: 1_000_000, kind: "permission" }]);
   });
 });
 

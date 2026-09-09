@@ -15,7 +15,7 @@ import type { Project, SessionState, SessionView, StatusCounts } from "../shared
  * SessionEnd は受信側のみ対応（OPEN-03）。TaskCreated はタスク作成タイトルの取得経路（260712_3 —
  * 実 claude 2.1.207 の hook stdin ダンプで payload を実測確認済み）。
  */
-export const ACCEPTED_EVENT_NAMES = ["Stop", "Notification", "UserPromptSubmit", "SessionEnd", "TaskCreated"] as const;
+export const ACCEPTED_EVENT_NAMES = ["Stop", "Notification", "UserPromptSubmit", "SessionEnd", "TaskCreated", "SessionStart"] as const;
 export type HookEventName = (typeof ACCEPTED_EVENT_NAMES)[number];
 
 export interface HookEvent {
@@ -27,8 +27,15 @@ export interface HookEvent {
   transcript_path?: string;
   /** UserPromptSubmit のみ: 送信されたプロンプト本文（現在の作業テキストの実データ源。260712 課題B） */
   prompt?: string;
+  /** SessionStart のみ: startup / resume / clear / compact / fork（公式 hooks reference。260909_1。ログ用） */
+  source?: string;
   /** TaskCreated のみ: 作成されたタスクの件名（作業テキストの実データ源。260712_3） */
   task_subject?: string;
+  /**
+   * Notification のみ: 通知種別（公式 hooks reference。permission_prompt / idle_prompt / elicitation_dialog /
+   * elicitation_url_dialog / agent_needs_input / agent_completed / quota_auto_resume_* 等。260908_2 で受理）
+   */
+  notification_type?: string;
 }
 
 /** SessionEnd の正常終了 reason（design.md 4.8。これ以外・欠落は「エラー相当」と判定する） */
@@ -63,7 +70,9 @@ export function validateEvent(payload: unknown): ValidationResult {
   if (typeof p.reason === "string") event.reason = p.reason;
   if (typeof p.transcript_path === "string") event.transcript_path = p.transcript_path;
   if (typeof p.prompt === "string") event.prompt = p.prompt;
+  if (typeof p.source === "string") event.source = p.source;
   if (typeof p.task_subject === "string") event.task_subject = p.task_subject;
+  if (typeof p.notification_type === "string") event.notification_type = p.notification_type;
   return { ok: true, event };
 }
 
@@ -83,6 +92,16 @@ export function extractWorkText(prompt: string | undefined): string | undefined 
 }
 
 /**
+ * UserPromptSubmit の prompt がバックグラウンドタスク（Monitor / run_in_background の Bash 等）の完了・進捗通知による
+ * 自動起床か（260908_1）。Claude Code は `<task-notification>…</task-notification>` を user メッセージとして注入し、
+ * そのたびに UserPromptSubmit hook を発火する（2026-09-08 実測: transcript の origin.kind="task-notification"）。
+ * 人の依頼文ではないので作業テキストに使わず、「バックグラウンド作業に駆動されている」印にだけ使う
+ */
+export function isTaskNotificationPrompt(prompt: string | undefined): boolean {
+  return prompt !== undefined && /^\s*<task-notification>/.test(prompt);
+}
+
+/**
  * Stop hook の block 理由 → タイルの作業テキスト（260907_1 R2）。
  * eval-loop の理由文は「[Eval-loop iteration 1/4 | RESUME 1/3] The loop is mid-iteration …」の形なので、
  * 先頭の `[...]` ラベル（78 文字以内）だけを出す。ラベルが無い・長すぎるときは 1 行目を WORK_TEXT_MAX で省略。
@@ -96,10 +115,28 @@ export function blockReasonToWorkText(reason: string): string | undefined {
 }
 
 /**
- * Notification message の種別分類（design.md 4.3）。
- * いずれの種別でも遷移先は「確認待ち」（安全側）。分類はログ・将来の出し分け用。
+ * Notification の種別分類（design.md 4.3。260908_2 で公式 `notification_type` を優先）。
+ * - permission = 人の応答が要る（permission_prompt / elicitation_dialog / elicitation_url_dialog / agent_needs_input）。
+ *   ループ中・バックグラウンド作業中でも「確認待ち」にする
+ * - idle = 応答完了から約 60 秒無操作（idle_prompt）。作業継続中の保持の対象
+ * - other = それ以外（auth_success / agent_completed / quota_auto_resume_* / 不明）
+ * notification_type が無い（旧版・擬似注入）ときは message の文言で推定する（従来どおり）。
  */
-export function classifyNotification(message: string | undefined): "permission" | "idle" | "other" {
+export type NotificationKind = "permission" | "idle" | "other";
+
+const PERMISSION_NOTIFICATION_TYPES: ReadonlySet<string> = new Set([
+  "permission_prompt",
+  "elicitation_dialog",
+  "elicitation_url_dialog",
+  "agent_needs_input",
+]);
+
+export function classifyNotification(message: string | undefined, notificationType?: string): NotificationKind {
+  if (notificationType !== undefined && notificationType !== "") {
+    if (PERMISSION_NOTIFICATION_TYPES.has(notificationType)) return "permission";
+    if (notificationType === "idle_prompt") return "idle";
+    return "other";
+  }
   if (!message) return "other";
   const m = message.toLowerCase();
   if (m.includes("permission") || m.includes("許可")) return "permission";
@@ -114,9 +151,12 @@ export function classifyNotification(message: string | undefined): "permission" 
  * - UserPromptSubmit → 実行中（OPEN-04 案 A 採用 — 2026-07-11。hooks へ自動追記される。design.md 4.1 / 4.5）
  * - TaskCreated → 実行中（タスク作成は作業中にしか起きない。260712_3）
  * - SessionEnd → 正常終了 reason なら null（状態を変えず破棄・ログのみ）、それ以外は「エラー」（OPEN-03 の検知できた範囲）
+ * - SessionStart → null（状態は作らない。同じプロジェクトの終了済み・切断の表示を消す。applyEvent 参照。260909_1）
  */
 export function mapEventToState(evt: HookEvent): SessionState | null {
   switch (evt.hook_event_name) {
+    case "SessionStart":
+      return null;
     case "Stop":
       return "done";
     case "Notification":
@@ -173,8 +213,17 @@ interface SessionRec {
    * 表示状態（完了・確認待ち等）は残すが、分割タイルの対象から外れ、表示選定では生存セッションに劣後する
    */
   dead?: boolean;
-  /** eval-loop の進捗バッジ文言（260907_2。eval-loop-status.loopTextForSessions 由来。無ければ非表示） */
+  /** eval-loop の進捗バッジ文言（260907_2。eval-loop-status.loopStatusForSessions 由来。無ければ非表示） */
   loopText?: string;
+  /** hook payload の cwd（260908_1: `<cwd>/.mso` のループ state を探す基点。再接続復元だけのセッションには無い） */
+  cwd?: string;
+  /**
+   * 直近のプロンプトがバックグラウンドタスクの通知（task-notification）だった（260908_1）。
+   * 人のプロンプトで解除。Stop の後も登録簿が idle でなければ「バックグラウンド作業の完了待ち」として実行中に保つ根拠
+   */
+  backgroundDriven?: boolean;
+  /** 確認待ちの種別（Notification の分類。260908_1: permission 以外はループ中・バックグラウンド作業中なら確認待ちにしない） */
+  confirmKind?: NotificationKind;
 }
 
 /**
@@ -241,6 +290,8 @@ export interface ApplyResult {
    * 破棄しないと、実行中優先表示（displaySessions）が終了済みセッションを「実行中」として固定し続ける。
    */
   discardedRunning?: boolean;
+  /** SessionStart で消した同一プロジェクトの終了済み・切断セッション（260909_1。state は "waiting"） */
+  prunedSessions?: string[];
 }
 
 /**
@@ -258,11 +309,29 @@ export class StateStore extends EventEmitter {
    * 検証済みイベントを適用する（design.md 5.1 の遷移表）。
    * 戻り値 null = 破棄（未登録 cwd / 正常 SessionEnd）。
    */
-  applyEvent(evt: HookEvent, projects: readonly Project[]): ApplyResult | null {
+  applyEvent(evt: HookEvent, projects: readonly Project[], opts?: { holdRunning?: boolean }): ApplyResult | null {
     const project = matchProjectByCwd(evt.cwd, projects);
     if (project === null) return null; // 破棄してログのみ（design.md 10 章）
 
-    const mapped = mapEventToState(evt);
+    if (evt.hook_event_name === "SessionStart") {
+      // 新しいセッションの開始（260909_1）: 表示は作らない（最初のプロンプトで実行中になる）。
+      // 同じプロジェクトの「終了済み」「切断」の記録は、もう見る意味が無いので消してタイルを待機へ戻す
+      // （2026-09-09 実測: Claude Code を再起動した後、前のセッションの「切断・8 分前」が最初のプロンプトまで残った）。
+      // 生存中の他セッション（実行中・完了・確認待ち）には触れない
+      const pruned: string[] = [];
+      for (const rec of this.sessions.values()) {
+        if (rec.projectId !== project.id) continue;
+        if (rec.dead === true || rec.state === "disconnected" || rec.sessionId === evt.session_id) pruned.push(rec.sessionId);
+      }
+      for (const sid of pruned) this.sessions.delete(sid);
+      if (pruned.length > 0) this.emit("changed");
+      return { projectId: project.id, sessionId: evt.session_id, state: "waiting", prunedSessions: pruned };
+    }
+
+    let mapped = mapEventToState(evt);
+    // 作業継続中の保持（260908_1）: 呼び出し側がループ進行中・バックグラウンド作業中と判定した Stop / Notification は
+    // 「完了」「確認待ち」にせず「実行中」を保つ（イベントの受信自体は lastEventAt・transcript パスに反映する）
+    if (opts?.holdRunning === true && (mapped === "done" || mapped === "confirm")) mapped = "running";
     if (mapped === null) {
       // 正常 SessionEnd: 表示状態は変えない（design.md 4.8）。ただし「実行中」のまま
       // 終了したセッション（中断→終了で Stop が来ないケース）の記録は破棄する。
@@ -305,11 +374,21 @@ export class StateStore extends EventEmitter {
     rec.projectId = project.id;
     // 切断検知（260712_2）用: transcript の実パスを保持（イベントに載っていれば常に最新へ更新）
     if (evt.transcript_path !== undefined) rec.transcriptPath = evt.transcript_path;
-    if (evt.hook_event_name === "Notification") rec.lastMessage = evt.message;
+    rec.cwd = evt.cwd;
+    if (evt.hook_event_name === "Notification") {
+      rec.lastMessage = evt.message;
+      rec.confirmKind = classifyNotification(evt.message, evt.notification_type);
+    }
     if (evt.hook_event_name === "UserPromptSubmit") {
-      // 現在の作業テキスト（260712 課題B）: prompt が取れたときのみ更新（空は既存値を維持）
-      const work = extractWorkText(evt.prompt);
-      if (work !== undefined) rec.workText = work;
+      if (isTaskNotificationPrompt(evt.prompt)) {
+        // バックグラウンドタスクの通知による起床（260908_1）: 作業テキストは人の依頼文のまま維持し、駆動中の印だけ立てる
+        rec.backgroundDriven = true;
+      } else {
+        delete rec.backgroundDriven;
+        // 現在の作業テキスト（260712 課題B）: prompt が取れたときのみ更新（空は既存値を維持）
+        const work = extractWorkText(evt.prompt);
+        if (work !== undefined) rec.workText = work;
+      }
     }
     if (evt.hook_event_name === "TaskCreated") {
       // 作業テキストの更新（260712_3）: タスク件名はプロンプト全文より「いま何をやっているか」に近い
@@ -424,12 +503,37 @@ export class StateStore extends EventEmitter {
   }
 
   /** 確認待ちからの復帰検知の対象 = 「確認待ち」かつ終了済みでないセッション（260904_1 #2） */
-  confirmSessions(): Array<{ sessionId: string; projectId: string; transcriptPath?: string; lastEventAt: number }> {
-    const out: Array<{ sessionId: string; projectId: string; transcriptPath?: string; lastEventAt: number }> = [];
+  confirmSessions(): Array<{ sessionId: string; projectId: string; transcriptPath?: string; lastEventAt: number; kind?: NotificationKind }> {
+    const out: Array<{ sessionId: string; projectId: string; transcriptPath?: string; lastEventAt: number; kind?: NotificationKind }> = [];
     for (const rec of this.sessions.values()) {
       if (rec.state === "confirm" && rec.dead !== true) {
-        out.push({ sessionId: rec.sessionId, projectId: rec.projectId, transcriptPath: rec.transcriptPath, lastEventAt: rec.lastEventAt });
+        out.push({ sessionId: rec.sessionId, projectId: rec.projectId, transcriptPath: rec.transcriptPath, lastEventAt: rec.lastEventAt, kind: rec.confirmKind });
       }
+    }
+    return out;
+  }
+
+  /** transcript の実パス（260908_1: 保持判定の停滞ガード用。未知・未取得は undefined） */
+  transcriptPathOf(sessionId: string): string | undefined {
+    return this.sessions.get(sessionId)?.transcriptPath;
+  }
+
+  /** 直近のプロンプトがバックグラウンドタスクの通知だったか（260908_1。未知のセッションは false） */
+  isBackgroundDriven(sessionId: string): boolean {
+    return this.sessions.get(sessionId)?.backgroundDriven === true;
+  }
+
+  /**
+   * ループ state の探索に要る情報（260908_1）: 終了済みでない全セッションの id・cwd・プロジェクトのパス。
+   * cwd が無い（再接続復元のみ）セッションはプロジェクトのパスだけで探す
+   */
+  loopLookupSessions(projects: readonly Project[]): Array<{ sessionId: string; cwd?: string; projectPath: string }> {
+    const out: Array<{ sessionId: string; cwd?: string; projectPath: string }> = [];
+    for (const rec of this.sessions.values()) {
+      if (rec.dead === true) continue;
+      const project = projects.find((p) => p.id === rec.projectId);
+      if (project === undefined) continue;
+      out.push({ sessionId: rec.sessionId, cwd: rec.cwd, projectPath: project.path });
     }
     return out;
   }

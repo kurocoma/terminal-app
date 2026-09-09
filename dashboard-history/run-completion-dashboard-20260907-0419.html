@@ -1,0 +1,297 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>terminal-app 260907_2（ループ進捗バッジ）＋ 260907_1（作業中を実行中として扱う） — 作業完了ダッシュボード</title>
+<!-- dashboard-meta {"schema":"completion-dashboard-meta/1","created":"2026-09-07T04:19:34+0900","subject":"terminal-app 260907_2（ループ進捗バッジ）＋ 260907_1（作業中を実行中として扱う）","state":"要確認","score":89,"open_tasks":1,"blockers":0} -->
+<style>
+  :root { --bg:#f6f7f9; --card:#ffffff; --text:#1f2937; --muted:#6b7280; --border:#e5e7eb;
+          --ok:#166534; --warn:#92400e; --bad:#991b1b; --info:#1d4ed8; }
+  * { box-sizing: border-box; }
+  body { margin:0; padding:24px; font-family:system-ui,-apple-system,"Segoe UI",sans-serif;
+         background:var(--bg); color:var(--text); line-height:1.6; }
+  main { max-width:1120px; margin:0 auto; }
+  header { margin-bottom:20px; }
+  h1 { margin:0 0 8px; font-size:28px; }
+  h2 { margin:0 0 12px; font-size:18px; }
+  h3 { margin:0 0 8px; font-size:15px; }
+  .meta { color:var(--muted); font-size:14px; }
+  .grid { display:grid; grid-template-columns:repeat(12,1fr); gap:16px; }
+  .card { grid-column:span 12; background:var(--card); border:1px solid var(--border);
+          border-radius:14px; padding:18px; box-shadow:0 1px 2px rgba(0,0,0,.04); }
+  section.card { margin-bottom:16px; }
+  .span-3 { grid-column:span 3; } .span-4 { grid-column:span 4; }
+  .span-6 { grid-column:span 6; } .span-8 { grid-column:span 8; } .span-12 { grid-column:span 12; }
+  .status { display:inline-flex; align-items:center; gap:6px; padding:4px 10px; border-radius:999px;
+            font-size:13px; font-weight:700; border:1px solid var(--border); white-space:nowrap; }
+  .ok { color:var(--ok); background:#dcfce7; }   .warn { color:var(--warn); background:#fef3c7; }
+  .bad { color:var(--bad); background:#fee2e2; } .info { color:var(--info); background:#dbeafe; }
+  .score { font-size:44px; font-weight:800; line-height:1; }
+  .score small { font-size:18px; color:var(--muted); }
+  .summary-list { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; }
+  .summary-item { border:1px solid var(--border); border-radius:12px; padding:14px; background:#fafafa; }
+  .summary-item strong { display:block; margin-bottom:6px; }
+  .table-wrap { width:100%; overflow-x:auto; }
+  table { width:100%; border-collapse:collapse; font-size:14px; }
+  th, td { border-bottom:1px solid var(--border); padding:10px 8px; vertical-align:top; text-align:left; }
+  th { color:var(--muted); font-weight:700; background:#fafafa; }
+  ul, ol { margin:8px 0 0; padding-left:22px; }
+  details { border:1px solid var(--border); border-radius:12px; padding:12px; background:#fafafa; }
+  summary { cursor:pointer; font-weight:700; }
+  .muted { color:var(--muted); }
+  .priority-high { font-weight:700; color:var(--bad); }
+  .priority-mid  { font-weight:700; color:var(--warn); }
+  .priority-low  { font-weight:700; color:var(--muted); }
+  a { color:var(--info); word-break:break-all; }
+  code { background:#f3f4f6; padding:1px 5px; border-radius:6px; font-size:13px; word-break:break-all; }
+  .copy { user-select:all; display:inline-block; background:#1f2937; color:#f9fafb;
+          padding:5px 10px; border-radius:8px; font-family:Consolas,monospace; font-size:13px; }
+  .reply-box { margin-top:6px; border:1px dashed var(--info); border-radius:8px; background:#eff6ff; padding:8px 10px; }
+  .reply-label { display:block; font-size:12px; color:var(--info); font-weight:700; }
+  .reply-box pre { margin:4px 0 0; white-space:pre-wrap; font-family:inherit; font-size:14px; user-select:all; }
+  .check-cell { display:inline-flex; gap:6px; align-items:center; white-space:nowrap; }
+  .check-cell input { width:16px; height:16px; }
+  @media (max-width:760px) {
+    body { padding:14px; }
+    .span-3, .span-4, .span-6, .span-8 { grid-column:span 12; }
+    .summary-list { grid-template-columns:1fr; }
+    table { font-size:13px; }
+    th, td { padding:8px 6px; }
+  }
+  @media print {
+    body { background:#ffffff; padding:0; }
+    .card { box-shadow:none; break-inside:avoid; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>作業完了ダッシュボード</h1>
+    <div class="meta">作成日時: 2026-09-07 04:19 / 対象: terminal-app 260907_2（ループ進捗バッジ）＋ 260907_1（作業中を実行中として扱う） / 進行モデル（この報告を書いたAI）: claude-fable-5-1 /
+      ブランチ（作業用の枝分かれ名）: main / commit（変更の保存記録）: 6e98c40（バッジ実装。260907_1 は 9855b19。この報告書は別コミット）</div>
+  </header>
+
+  <section class="card" id="sec-0">
+    <h2>0. 3秒サマリー</h2>
+    <div class="summary-list">
+      <div class="summary-item"><strong>結論</strong>
+        <span class="status warn">要確認</span><p>依頼の 2 件を終えました。(1) ループ進捗バッジ: タイル名の下に「ループ 2/4・codex 実装中 1分・最高 78点」のような青いバッジが出ます（実装・テスト・実画面確認・稼働アプリ反映まで完了）。(2) push: GitHub へ送信済み（origin/main を最新に更新）。実際のループでの見え方だけ、次回のループで確認してください。</p></div>
+      <div class="summary-item"><strong>あなたの対応</strong>
+        <span class="status warn">後でよい</span>
+        <p>次にループを回したとき、タイルに進捗バッジが出て「完了」「切断」のまま止まらないかを見る（<a href="#sec-2">詳しくは「2. あなたの次のアクション」へ</a>）</p></div>
+      <div class="summary-item"><strong>作業を止めている問題（ブロッカー）</strong>
+        <span class="status ok">該当なし</span><p>作業を止める問題はありません。</p></div>
+    </div>
+  </section>
+
+  <section class="card" id="sec-1">
+    <h2>1. 状態カード</h2>
+    <div class="grid">
+      <div class="card span-3"><h3>完了状態</h3>
+        <p><span class="status warn">要確認</span></p></div>
+      <div class="card span-3"><h3>報告の確かさ</h3>
+        <p><span class="status warn">中</span></p><p class="muted">自動テスト 462 件、実画面の動作確認 13 項目（バッジ）＋ 24 項目（実行中維持）＋回帰 8 項目はすべて成功。ただし本物の品質ループでの表示はまだ観測していません（再起動直後のため）。</p></div>
+      <div class="card span-3"><h3>自己採点</h3>
+        <div class="score">89<small>/100</small></div></div>
+      <div class="card span-3"><h3>情報の新しさ</h3>
+        <p>2026-09-07 04:19 作成。稼働中の terminal-app は 04:18:58 にバッジ入りの版で再起動済み（プロセス番号 33812）。GitHub への送信は 04:15 頃（260907_1 まで）と本報告の直前（バッジ分）。</p></div>
+      <div class="card span-12"><h3>画面確認サーバー（ローカルで実際の画面を見るための起動状態）</h3>
+        <p><span class="status ok">対象外（画面の変更なし）</span>
+           このアプリは Web アプリではなく Windows の常駐アプリ（Electron）です。画面はすでに稼働中のアプリで確認できます（タイルに青いバッジが出ます）。</p>
+        <p>確認する画面: 今回は Web の画面確認サーバーの対象外のため起動していません（稼働中の terminal-app のタイルを見てください）</p>
+        </div>
+    </div>
+  </section>
+
+  <section class="card" id="sec-2">
+    <h2>2. あなたの次のアクション</h2>
+    <p class="muted">上から順に対応してください。「返信で選ぶ」は、チャットに記号1文字（例: A）だけ返信すれば伝わります。
+       黒い枠のコマンドは1回クリックすると全文が選択されるので、そのまま Ctrl+C でコピーできます。<br>
+       ※ 左端のチェックはこの画面上だけの目印です。ページを再読み込みすると消えます。</p>
+    <div class="table-wrap"><table>
+      <tr><th style="width:64px">済</th><th style="width:40px">順</th><th style="width:120px">種別</th><th>やること</th><th>やり方（クリック / コピペ / 返信）</th></tr>
+      <tr><td><label class="check-cell"><input type="checkbox"> 済</label></td><td>1</td>
+        <td><span class="status info">後でよい・コピペ</span></td>
+        <td>次に品質ループや codex を動かしたあと、タイルに進捗バッジが出たか・「実行中へ戻した」記録があるかを確認する。バッジが出ない／タイルが「完了」「切断」のまま止まる場合は、その時刻をチャットで教えてください</td>
+        <td>コマンドプロンプト（黒い画面）で実行すると、該当行だけが出ます:<br><code class="copy">findstr /C:"ループ進捗バッジ" /C:"実行中へ復帰" "%APPDATA%\terminal-app\logs\app.log"</code></td></tr>
+      <tr><td><label class="check-cell"><input type="checkbox"> 済</label></td><td>2</td>
+        <td><span class="status warn">返信で選ぶ</span></td>
+        <td>バッジの文言が長いときの見せ方を決める（今はタイル幅で「…」省略し、マウスを乗せると全文が出る）</td>
+        <td><strong>A</strong> = このまま（推奨。情報量を保つ） / <strong>B</strong> = 点数を省いて短くする（例「ループ 2/4・実装中」）</td></tr>
+    </table></div>
+  </section>
+
+  <section class="card" id="sec-3">
+    <h2>3. 今回の差分</h2>
+    <div class="table-wrap"><table>
+      <tr><th>区分</th><th>内容</th></tr>
+      <tr><td>前回からの推移</td><td>状態: 要確認→要確認 / 自己採点: 88→89 / 残タスク: 2件→1件</td></tr>
+      <tr><td>新しく完了</td><td>ループ進捗バッジ（260907_2。実装コミット 6e98c40）。GitHub への送信（前回まで未送信だった 11 コミットを含めて origin/main を更新）。稼働アプリをバッジ入りの版で再起動</td></tr>
+      <tr><td>新しく発生した懸念</td><td>バッジの文言がタイル幅を超えると「…」で省略される（マウスを乗せると全文）。eval-loop の状態ファイルの形式が将来変わると読めなくなる（バッジが出なくなるだけで、他の表示は壊れない）</td></tr>
+      <tr><td>解消済み</td><td>前回の確認事項「案 C（バッジ）を追加するか」は「追加する」で決定・実装済み</td></tr>
+      <tr><td>未変化</td><td>前回の確認事項「完了通知の遅れ 3.5 秒のままでよいか」は未回答（このまま）。前回 260906_1 の手動確認枠は今回も触れていない</td></tr>
+    </table></div>
+  </section>
+
+  <section class="card" id="sec-4">
+    <h2>4. 現状サマリー</h2>
+    <div class="table-wrap"><table>
+      <tr><th>目的</th><td>(260907_1) 品質ループや codex が作業中なのにタイルが「完了」「切断」のまま止まる問題を直す。(260907_2) その上で、タイルにループの進み具合（何周目・どの段階・最高点）を出す</td></tr>
+      <tr><th>今回できたこと</th><td>バッジの情報源を eval-loop の状態ファイル（registry → state.json）と codex ジョブの生存記録（heartbeat）に固定し、15 秒ごとの見直しで更新。fork ループ（agents 登録）も対応。終了後は 30 分だけ結果（合格 92 点 など）を表示。新規テスト 19 件・実画面確認 13 項目・回帰 8 項目・稼働アプリ再起動・GitHub へ送信</td></tr>
+      <tr><th>まだ残っていること</th><td>本物のループでバッジと「実行中」維持を観測して確かめる（時間依存。次のループで分かる）</td></tr>
+      <tr><th>作業を止めている問題</th><td>該当なし</td></tr>
+    </table></div>
+  </section>
+
+  <section class="card" id="sec-5">
+    <h2>5. プラン進捗（計画の進み具合）</h2>
+    <div class="table-wrap"><table>
+      <tr><th>項目</th><th>状態</th><th>根拠・成果物</th></tr>
+      <tr><td>260907_1 Task 1〜6, 8: 実行中維持の判定・配線・E2E・文書</td><td><span class="status ok">完了</span></td><td>コミット 9855b19 / <code>docs/evidence/20260907-loop-running/</code>（24 項目 OK）</td></tr>
+      <tr><td>260907_1 Task 7: 稼働アプリ反映と実環境確認</td><td><span class="status warn">一部完了</span></td><td>反映済み。実ループでの「戻した」記録は未観測（次のループで確認）</td></tr>
+      <tr><td>Task 9: eval-loop の状態を読む部品（純関数＋ファイル読取）</td><td><span class="status ok">完了</span></td><td><code>src/main/eval-loop-status.ts</code> / <code>tests/eval-loop-status.test.ts</code>（16 件）</td></tr>
+      <tr><td>Task 10: 状態ストアにバッジ文言を載せる</td><td><span class="status ok">完了</span></td><td><code>src/main/state-store.ts</code>（applyLoopText）/ <code>tests/state-store-loop-text.test.ts</code>（3 件）/ <code>src/shared/types.d.ts</code></td></tr>
+      <tr><td>Task 11: 配線と描画（15 秒の見直し・青いピル・両方無ければ行ごと非表示）</td><td><span class="status ok">完了</span></td><td><code>src/main/index.ts</code> / <code>src/renderer/renderer.ts</code> / <code>styles.css</code></td></tr>
+      <tr><td>Task 12: 実画面確認・文書・報告・コミット・push</td><td><span class="status ok">完了</span></td><td><code>scripts/verify-loop-badge-e2e.mjs</code> → <code>docs/evidence/20260907-loop-badge/</code>（13 項目 OK）、spec REQ-18/AC-22、design 5.2/6.2、verification V-23、README、コミット 6e98c40、push 済み</td></tr>
+    </table></div>
+  </section>
+
+  <section class="card" id="sec-6">
+    <h2>6. 残タスク</h2>
+    <div class="table-wrap"><table>
+      <tr><th>担当</th><th>優先度</th><th>タスク</th><th>理由</th><th>次のアクション</th></tr>
+      <tr><td>あなた（ユーザー）の判断待ち</td>
+        <td class="priority-mid">中</td><td>次のループでバッジ表示と「実行中」維持を実地で確認する</td><td>再起動直後で本物のループのイベントがまだ届いていない。擬似データでの確認は完了</td><td>「2. あなたの次のアクション」の 1</td></tr>
+    </table></div>
+  </section>
+
+  <section class="card" id="sec-7">
+    <h2>7. 自己採点</h2>
+    <div class="table-wrap"><table>
+      <tr><th>観点</th><th>配点</th><th>得点</th><th>根拠</th></tr>
+      <tr><td>要件達成度（頼まれたことをどれだけ実現したか）</td><td>30</td><td>28</td><td>「ループ進捗バッジを追加して」「push して」の両方を完了。バッジは提案どおり周回・段階・最高点・codex ジョブ・終了結果まで対応。実ループでの実観測が残る</td></tr>
+      <tr><td>実装・作業品質（作りの丁寧さ）</td><td>20</td><td>18</td><td>状態ファイルの読取を純関数に分離し、壊れたファイルは例外にせず無視。既存テスト無改変で 462 件成功。手動バッジの位置も回帰なし（260904_1 の E2E 8 項目 OK）</td></tr>
+      <tr><td>検証の十分さ（動作確認をどこまでしたか）</td><td>20</td><td>17</td><td>テストを先に書いて失敗を確認してから実装（TDD）。実画面確認 13 項目と画像の目視。稼働アプリ再起動。本物のループでの表示は未観測</td></tr>
+      <tr><td>リスク管理（問題の見落とし対策）</td><td>15</td><td>13</td><td>eval-loop の状態ファイルは同じ作者のハーネスだが仕様書はなく、形式変更で読めなくなる可能性を設計書に明記。走査上限（200 件）で暴走を防止</td></tr>
+      <tr><td>説明の明瞭さ（報告の分かりやすさ）</td><td>15</td><td>13</td><td>情報源・表示規則・限界を README と設計書に記録。用語には説明を添えた</td></tr>
+      <tr><th>総合</th><th>100</th><th>89</th><th>実装・検証・反映・送信は完了。実ループでの確認が残るため「要確認」</th></tr>
+    </table></div>
+  </section>
+
+  <section class="card" id="sec-8">
+    <h2>8. 懸念事項</h2>
+    <div class="table-wrap"><table>
+      <tr><th>重要度</th><th>懸念</th><th>影響</th><th>対応案</th></tr>
+      <tr><td class="priority-mid">中</td><td>Claude Code の登録簿（<code>~/.claude/sessions</code>）は公開仕様ではない（260907_1 の判定の根拠）</td><td>Claude Code の更新で形式が変わると busy による判定が効かなくなる（従来の記録ファイル判定に戻るだけで壊れはしない）</td><td>更新後にログで「登録簿 status=busy」の復帰が出るか確認する</td></tr>
+      <tr><td class="priority-mid">中</td><td>Stop 時の後処理（hook）全体が 3.5 秒以上かかると一時的に「実行中」へ戻る</td><td>「完了」の表示が最大 25 秒ほど遅れ、そのときの完了通知は出ない</td><td>頻発するなら猶予（設定値 TERMINAL_APP_STOPPED_RESUME_MIN_AGE_MS）を延ばす</td></tr>
+      <tr><td class="priority-low">低</td><td>バッジの文言（最長で「ループ 2/4・codex 実装中 12分・最高 78点」）がタイル幅を超える</td><td>末尾が「…」で省略される（マウスを乗せると全文が出る）</td><td>気になれば点数を省く短い形式に変更できる（確認事項 2）</td></tr>
+      <tr><td class="priority-low">低</td><td>eval-loop の状態ファイル（state.json）の形式が将来変わる</td><td>バッジが出なくなる（他の表示・判定には影響しない）</td><td>eval-loop 側を変えたときは <code>tests/eval-loop-status.test.ts</code> の実測サンプルを更新する</td></tr>
+    </table></div>
+  </section>
+
+  <section class="card" id="sec-9">
+    <h2>9. 確認事項</h2>
+    <p class="muted">記号だけ返信すれば伝わります（例: 「1-A 2-B」）。全部おまかせなら「全部A」でも大丈夫です。</p>
+    <div class="table-wrap"><table>
+      <tr><th style="width:48px">番号</th><th style="width:64px">優先度</th><th>確認したいこと</th><th>選択肢（選ぶとどうなるかを添える）</th></tr>
+      <tr><td>1</td><td class="priority-low">低</td><td>バッジの文言が長いときの見せ方</td>
+        <td><strong>A</strong> = このまま（「…」省略＋マウスで全文。情報量を保つ）（推奨） / <strong>B</strong> = 点数を省いて短くする（常に全文が見えるが最高点は消える）</td></tr>
+      <tr><td>2</td><td class="priority-low">低</td><td>完了通知の遅れは 3.5 秒のままでよいか（前回からの持ち越し）</td>
+        <td><strong>A</strong> = このまま（誤通知を確実に防げる）（推奨） / <strong>B</strong> = 短くする（誤通知の可能性がわずかに増える）</td></tr>
+    </table></div>
+  </section>
+
+  <section class="card" id="sec-10">
+    <h2>10. 対象外・未対応（今回やっていないこと）</h2>
+    <ul><li>eval-loop 側（hook・スクリプト・state.json の形式）は変更していない（terminal-app が読むだけ）</li>
+      <li>バッジからループを操作する機能（停止・再開など）は無い。表示のみ</li>
+      <li>登録簿の idle / waiting を「完了」「確認待ち」の根拠にすること（260907_1 の対象外のまま）</li>
+      <li>前回 260906_1 の手動確認枠（整列ボタン・ドラッグ並べ替えの実機確認）</li>
+      <li>本物のループでのバッジ表示の観測（再起動直後のため未観測。次のループで分かる）</li></ul>
+  </section>
+
+  <section class="card" id="sec-11">
+    <h2>11. 検証・実施ログ</h2>
+    <div class="table-wrap"><table>
+      <tr><th>項目</th><th>結果</th><th>内容</th></tr>
+      <tr><td>変更ファイル</td><td><span class="status info">今回 17件＋証跡 4件</span></td><td>本体 6（<code>src/main/</code> の eval-loop-status〔新規〕/ index / state-store、<code>src/renderer/</code> の renderer / styles、<code>src/shared/types.d.ts</code>）、新規テスト 2、E2E スクリプト 1、docs 5、README、plan。証跡は <code>docs/evidence/20260907-loop-badge/</code></td></tr>
+      <tr><td>動作テスト</td><td><span class="status ok">成功</span></td><td><code>npm test</code>（自動テスト一式）= 52 ファイル / 462 件すべて成功。新規 19 件は実装前に失敗を確認してから実装。E2E（実際の画面での動作確認）13 項目 OK、260904_1 の回帰 E2E 8 項目 OK</td></tr>
+      <tr><td>ビルド（動く形への変換）</td><td><span class="status ok">成功</span></td><td><code>npm run build</code>（TypeScript を Electron が実行できる形に変換）exit 0。稼働アプリを止めて新しい版で再起動（04:18:58）</td></tr>
+      <tr><td>コードチェック（Lint / 型チェック）</td><td><span class="status ok">成功</span></td><td><code>npm run typecheck</code>（型の整合性）と <code>npm run lint</code>（書き方の規約）ともに exit 0</td></tr>
+      <tr><td>GitHub への送信（push）</td><td><span class="status ok">成功</span></td><td><code>git push origin main</code> を 2 回（260907_1 まで 11 コミット → a35b15c..b596766、バッジ実装 6e98c40）。この報告書のコミットは送信後にチャットで報告</td></tr>
+    </table></div>
+    <details><summary>詳細ログ・スクリーンショット</summary>
+      <p>バッジの E2E 画像（クリックで開く。画像は埋め込んでいません）:</p>
+      <ul>
+        <li><a href="file:///C:/Users/hppym/dev/terminal-app/docs/evidence/20260907-loop-badge/01-badges.png">01-badges.png</a> — 3 タイル: 「ループ 2/4・codex 実装中 …」（sessions 登録）／「ループ 1/4・採点中」（fork ループ）／バッジ無し<br><code>C:\Users\hppym\dev\terminal-app\docs\evidence\20260907-loop-badge\01-badges.png</code></li>
+        <li><a href="file:///C:/Users/hppym/dev/terminal-app/docs/evidence/20260907-loop-badge/02-ended.png">02-ended.png</a> — 終了後の「ループ終了・合格 92点」と、31 分前に終わった fork ループのバッジ消滅<br><code>C:\Users\hppym\dev\terminal-app\docs\evidence\20260907-loop-badge\02-ended.png</code></li>
+        <li><a href="file:///C:/Users/hppym/dev/terminal-app/docs/evidence/20260907-loop-badge/app.log">app.log</a>（E2E 中のアプリのログ。「ループ進捗バッジ 表示／消滅」の行）／ <a href="file:///C:/Users/hppym/dev/terminal-app/docs/evidence/20260907-loop-badge/result.json">result.json</a></li>
+      </ul>
+      <p>260907_1（実行中維持）の証跡は <a href="file:///C:/Users/hppym/dev/terminal-app/docs/evidence/20260907-loop-running/">docs/evidence/20260907-loop-running/</a>（画像 4 枚・app.log・result.json）。</p>
+      <p>E2E の要点: state.json は eval-loop v3 の実測形式（active / iteration / max_iterations / phase / best_score / ended_reason / ended_at / session_id / agent_id / jobs_dir）。codex ジョブは <code>jobs/iter-001-generator/</code> に started_at（65 秒前）と heartbeat（今）を置いて「走行中」を再現し、heartbeat を 60 秒前にすると段階表示（実装中）に戻ることを確認。</p>
+      <p>稼働アプリの再起動: 19:18:58Z「terminal-app 起動」（<code>%APPDATA%\terminal-app\logs\app.log</code>）。再起動でセッション表示は一度「待機」に戻るため、実ループのバッジは次の hook イベント以降に載る。</p>
+    </details>
+  </section>
+
+  <section class="card" id="sec-12">
+    <h2>12. 実行体制（どのAIが作業したか）</h2>
+    <p class="muted">この作業を担当したAI（人工知能プログラム）の一覧です。モデルID（AIの種類を表す正式な名前。
+       人でいう「担当者名」にあたる）で、どのAIが何をしたかを確認できます。</p>
+    <div class="table-wrap"><table>
+      <tr><th>役割</th><th>担当</th><th>モデルID</th><th>備考</th></tr>
+      <tr><td>進行管理（全体のとりまとめ）</td><td>メインセッション（この会話のAI）</td><td><code>claude-fable-5-1</code></td><td>システム情報から転記</td></tr>
+      <tr><td>計画（何をどう作るか決める）</td><td>メインセッションが兼任</td><td><code>claude-fable-5-1</code></td><td>同上（サブエージェントは使っていない）</td></tr>
+      <tr><td>実装（実際に作る作業）</td><td>メインセッションが兼任</td><td><code>claude-fable-5-1</code></td><td>同上</td></tr>
+      <tr><td>検証・採点（できばえの確認）</td><td>メインセッションが兼任</td><td><code>claude-fable-5-1</code></td><td>同上。自動テストと E2E スクリプトの実行結果に基づく</td></tr>
+    </table></div>
+  </section>
+
+  <section class="card" id="sec-13">
+    <h2>13. ステータス凡例・用語ミニ辞典</h2>
+    <p class="muted">完了=動作確認済みで残作業なし / 一部完了=一部のみ達成 / 未実施=実行していない /
+       未確認=情報を取得できていない / ブロック=作業を止める問題があり進めない。<br>
+       ※ この報告書は保存した時点の記録です。「起動中」などの状態は、開いた時点では変わっている可能性があります。</p>
+    <div class="table-wrap"><table>
+      <tr><th>用語</th><th>意味</th></tr>
+      <tr><td>モデルID</td><td>AIの種類を表す正式な名前。同じ「Claude」でも性能や世代が違うため、この名前でどのAIが作業したかを特定できる</td></tr>
+      <tr><td>品質ループ（eval-loop）</td><td>AI が実装と採点を繰り返し、点数が目標に届くまで自動で直し続ける仕組み</td></tr>
+      <tr><td>バッジ</td><td>タイルの名前の下に出る小さなラベル。手動で付ける灰色のものと、今回追加した青いループ進捗のものがある</td></tr>
+      <tr><td>state.json（状態ファイル）</td><td>品質ループが今何周目・どの段階かを書き出すファイル。バッジの情報源</td></tr>
+      <tr><td>registry（登録簿。eval-loop 側）</td><td>状態ファイルの置き場所を、セッションごとに 1 行で記録した一覧。<code>~/.claude/eval-loop/registry/</code></td></tr>
+      <tr><td>heartbeat</td><td>codex ジョブが「まだ生きている」と 5 秒ごとに更新するファイル。30 秒更新が無ければ止まったとみなす</td></tr>
+      <tr><td>fork ループ</td><td>メインの AI から分かれた別の AI（サブエージェント）で回す品質ループ。agents 側に登録される</td></tr>
+      <tr><td>サブエージェント</td><td>メインの AI から作業を任された別の AI</td></tr>
+      <tr><td>E2Eテスト</td><td>実際の画面操作をなぞる動作確認。今回は本物のアプリを別ポートで起動し、擬似の状態ファイルで再現した</td></tr>
+      <tr><td>push（送信）</td><td>手元の変更の保存記録（コミット）を GitHub に送ること</td></tr>
+      <tr><td>TDD</td><td>先にテストを書いて失敗を確かめてから実装する進め方（テスト駆動開発）</td></tr>
+    </table></div>
+  </section>
+
+  <section class="card" id="sec-14">
+    <h2>14. AIが次にできること（あなたの操作は不要）</h2>
+    <ol>
+      <li>実際のループで block が起きた場面や、バッジが載った場面のログと記録ファイルを確認し、想定どおりかを裏取りする
+        <div class="reply-box">
+          <span class="reply-label">そのまま返信する場合（この文をクリックして Ctrl+C でコピー）</span>
+          <pre>実ループのバッジと block 痕跡を確認して</pre>
+        </div>
+      </li>
+      <li>バッジの文言を短い形式（点数なし）に変える、または色・位置を調整する
+        <div class="reply-box">
+          <span class="reply-label">そのまま返信する場合（この文をクリックして Ctrl+C でコピー）</span>
+          <pre>バッジの文言を短くして</pre>
+        </div>
+      </li>
+      <li>完了通知の遅れ（3.5 秒）を短くする
+        <div class="reply-box">
+          <span class="reply-label">そのまま返信する場合（この文をクリックして Ctrl+C でコピー）</span>
+          <pre>完了通知の遅れを短くして</pre>
+        </div>
+      </li>
+    </ol>
+  </section>
+</main>
+</body>
+</html>

@@ -1,0 +1,44 @@
+2026-09-09T03:44:13.063Z [INFO] terminal-app 起動 (dataDir=C:\Users\tckam\AppData\Local\Temp\ta-badge-e2e-YClO5M, demo=false)
+2026-09-09T03:44:13.076Z [INFO] hooks を追補（不足イベントの追記/再追記）: C:\Users\tckam\AppData\Local\Temp\ta-badge-proj-a-f97zuH
+2026-09-09T03:44:13.084Z [INFO] statusLine 転送を追補: C:\Users\tckam\AppData\Local\Temp\ta-badge-proj-a-f97zuH
+2026-09-09T03:44:13.085Z [INFO] hooks を追補（不足イベントの追記/再追記）: C:\Users\tckam\AppData\Local\Temp\ta-badge-proj-b-FKOlBL
+2026-09-09T03:44:13.087Z [INFO] statusLine 転送を追補: C:\Users\tckam\AppData\Local\Temp\ta-badge-proj-b-FKOlBL
+2026-09-09T03:44:13.088Z [INFO] hooks を追補（不足イベントの追記/再追記）: C:\Users\tckam\AppData\Local\Temp\ta-badge-proj-c-qZfECA
+2026-09-09T03:44:13.090Z [INFO] statusLine 転送を追補: C:\Users\tckam\AppData\Local\Temp\ta-badge-proj-c-qZfECA
+2026-09-09T03:44:13.227Z [INFO] event-server: listening on http://127.0.0.1:42201/terminal-app/event
+2026-09-09T03:44:13.279Z [INFO] ウィンドウ判定（初回）: 接続 0 / 未接続 3 [loop-a, loop-b, loop-c]
+2026-09-09T03:44:13.481Z [INFO] window shown (demo=false, capture=-)
+2026-09-09T03:44:14.627Z [INFO] event 受信: UserPromptSubmit → running (project=p-a, session=e2e0000a-0000-4000-8000-000000000001)
+2026-09-09T03:44:14.629Z [INFO] ui-latency: 受信→描画完了 2ms (revision=2)
+2026-09-09T03:44:14.632Z [INFO] event 受信: UserPromptSubmit → running (project=p-b, session=e2e0000b-0000-4000-8000-000000000002)
+2026-09-09T03:44:14.637Z [INFO] event 受信: UserPromptSubmit → running (project=p-c, session=e2e0000c-0000-4000-8000-000000000003)
+2026-09-09T03:44:14.638Z [INFO] ui-latency: 受信→描画完了 6ms (revision=3)
+2026-09-09T03:44:14.679Z [INFO] ui-latency: 受信→描画完了 42ms (revision=4)
+2026-09-09T03:44:15.280Z [INFO] ループ進捗バッジ 表示: loop-a (session=e2e0000a-0000-4000-8000-000000000001) — ループ 2/4・codex 実装中 0分・最高 78点
+2026-09-09T03:44:15.280Z [INFO] ループ進捗バッジ 表示: loop-b (session=e2e0000b-0000-4000-8000-000000000002) — ループ 1/4・採点中
+2026-09-09T03:44:15.280Z [INFO] 作業継続中として保持: loop-a (session=e2e0000a-0000-4000-8000-000000000001) — ループ進行中（ループ 2/4・codex 実装中 0分・最高 78点）
+2026-09-09T03:44:15.281Z [INFO] 作業継続中として保持: loop-b (session=e2e0000b-0000-4000-8000-000000000002) — ループ進行中（ループ 1/4・採点中）
+2026-09-09T03:44:18.296Z [INFO] event 受信: Stop → running（実行中を維持: ループ進行中（ループ 2/4・codex 実装中 0分・最高 78点）） (project=p-a, session=e2e0000a-0000-4000-8000-000000000001)
+2026-09-09T03:44:18.302Z [INFO] ui-latency: 受信→描画完了 7ms (revision=6)
+2026-09-09T03:44:22.808Z [INFO] event 受信: Notification 種別=idle(idle_prompt) → running（実行中を維持: ループ進行中（ループ 2/4・codex 実装中 0分・最高 78点）） (project=p-a, session=e2e0000a-0000-4000-8000-000000000001)
+2026-09-09T03:44:22.819Z [INFO] ui-latency: 受信→描画完了 12ms (revision=7)
+2026-09-09T03:44:25.315Z [INFO] event 受信: Notification 種別=permission(agent_needs_input) → confirm (project=p-a, session=e2e0000a-0000-4000-8000-000000000001)
+2026-09-09T03:44:25.335Z [INFO] ui-latency: 受信→描画完了 20ms (revision=8)
+2026-09-09T03:44:28.143Z [INFO] event 受信: UserPromptSubmit → running (project=p-a, session=e2e0000a-0000-4000-8000-000000000001)
+2026-09-09T03:44:28.152Z [INFO] ui-latency: 受信→描画完了 9ms (revision=9)
+2026-09-09T03:44:29.288Z [INFO] 作業継続中として保持: loop-a (session=e2e0000a-0000-4000-8000-000000000001) — ループ進行中（ループ 2/4・実装中・最高 78点）
+2026-09-09T03:44:31.303Z [INFO] ループ進捗バッジ 消滅: loop-b (session=e2e0000b-0000-4000-8000-000000000002)
+2026-09-09T03:44:31.304Z [INFO] 保持を解除: loop-a (session=e2e0000a-0000-4000-8000-000000000001) — 直前の理由: ループ進行中（ループ 2/4・実装中・最高 78点）
+2026-09-09T03:44:31.304Z [INFO] 保持を解除: loop-b (session=e2e0000b-0000-4000-8000-000000000002) — 直前の理由: ループ進行中（ループ 1/4・採点中）
+2026-09-09T03:44:34.400Z [INFO] event 受信: Stop → done (project=p-a, session=e2e0000a-0000-4000-8000-000000000001)
+2026-09-09T03:44:34.403Z [INFO] ui-latency: 受信→描画完了 4ms (revision=12)
+2026-09-09T03:44:38.914Z [INFO] event 受信: Stop → done (project=p-c, session=e2e0000c-0000-4000-8000-000000000003)
+2026-09-09T03:44:38.919Z [INFO] ui-latency: 受信→描画完了 6ms (revision=13)
+2026-09-09T03:44:43.437Z [INFO] event 受信: UserPromptSubmit → running (project=p-c, session=e2e0000c-0000-4000-8000-000000000003)
+2026-09-09T03:44:43.454Z [INFO] ui-latency: 受信→描画完了 17ms (revision=14)
+2026-09-09T03:44:43.754Z [INFO] event 受信: UserPromptSubmit → running (project=p-c, session=e2e0000c-0000-4000-8000-000000000003)
+2026-09-09T03:44:43.770Z [INFO] ui-latency: 受信→描画完了 16ms (revision=15)
+2026-09-09T03:44:44.068Z [INFO] event 受信: Stop → running（実行中を維持: バックグラウンド作業の完了待ち（登録簿 status=shell）） (project=p-c, session=e2e0000c-0000-4000-8000-000000000003)
+2026-09-09T03:44:44.069Z [INFO] ui-latency: 受信→描画完了 2ms (revision=16)
+2026-09-09T03:44:49.404Z [INFO] 保持を解除: loop-c (session=e2e0000c-0000-4000-8000-000000000003) — 直前の理由: バックグラウンド作業の完了待ち（登録簿 status=shell）
+2026-09-09T03:44:49.409Z [INFO] 終了検知: loop-c (session=e2e0000c-0000-4000-8000-000000000003) — Stop 未受信だが transcript がターン完了を示すため「完了」へ

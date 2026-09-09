@@ -35,7 +35,7 @@ function readSettings(): { hooks: Record<string, Array<{ hooks: Array<{ type: st
 describe("イベント集合の定義", () => {
   it("ALL_HOOK_EVENTS = 従来 3 イベント + TaskCreated（既存 HOOK_EVENTS は不変）", () => {
     expect([...TASK_HOOK_EVENTS]).toEqual(["TaskCreated"]);
-    expect([...ALL_HOOK_EVENTS]).toEqual([...HOOK_EVENTS, "TaskCreated"]);
+    expect([...ALL_HOOK_EVENTS]).toEqual([...HOOK_EVENTS, "TaskCreated", "SessionStart"]); // SessionStart は 260909_1
   });
 });
 

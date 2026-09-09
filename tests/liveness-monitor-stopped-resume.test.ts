@@ -150,9 +150,10 @@ describe("findDisconnected — R4 登録簿 busy は切断しない", () => {
     expect(findDisconnected([sweepTarget], { ...stale, registryStatus: () => "busy" })).toEqual([]);
   });
 
-  it("status が idle・未取得（undefined）なら従来どおり切断する", () => {
-    expect(findDisconnected([sweepTarget], { ...stale, registryStatus: () => "idle" })).toEqual([sweepTarget]);
+  it("status が未取得（undefined）・waiting なら従来どおり切断する。idle は生きて入力待ちなので切断しない（260909_1）", () => {
     expect(findDisconnected([sweepTarget], { ...stale, registryStatus: () => undefined })).toEqual([sweepTarget]);
+    expect(findDisconnected([sweepTarget], { ...stale, registryStatus: () => "waiting" })).toEqual([sweepTarget]);
+    expect(findDisconnected([sweepTarget], { ...stale, registryStatus: () => "idle" })).toEqual([]);
   });
 
   it("registryStatus を渡さない呼び出し（従来の deps）も従来どおり", () => {

@@ -31,8 +31,15 @@ export const HOOK_EVENTS = ["Stop", "Notification", "UserPromptSubmit"] as const
  */
 export const TASK_HOOK_EVENTS = ["TaskCreated"] as const;
 
+/**
+ * セッション開始の検知（260909_1）: SessionStart → 同じプロジェクトの「切断」「終了済み」表示を消し、タイルを待機へ戻す。
+ * payload は session_id / cwd / source（startup / resume / clear / compact / fork。公式 hooks reference）。
+ * 起動時追補で既存プロジェクトにも冪等に行き渡る
+ */
+export const SESSION_HOOK_EVENTS = ["SessionStart"] as const;
+
 /** 実運用で追記する全イベント（index.ts の登録・起動時追補・除去はこちらを渡す） */
-export const ALL_HOOK_EVENTS = [...HOOK_EVENTS, ...TASK_HOOK_EVENTS] as const;
+export const ALL_HOOK_EVENTS = [...HOOK_EVENTS, ...TASK_HOOK_EVENTS, ...SESSION_HOOK_EVENTS] as const;
 
 export interface HookOpResult {
   ok: boolean;

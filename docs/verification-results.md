@@ -262,3 +262,57 @@ clickTarget=cursor での実運用 = #10 の実運用面も裏付け）。
 - 画像の目視: バッジはアクセント色（青）のピル。長い文言はタイル幅で「…」省略され、hover の title で全文が読める。
 - 稼働アプリへの反映: 旧プロセス（PID 100028）を終了 → 新ビルドを起動（19:18:58Z「terminal-app 起動」、PID 33812）。
   実ループの Monthly-report（registry/sessions に state あり）は再起動で表示が揮発するため、次の hook イベント以降にバッジが載る。
+
+### 8.7 追記: 260908_1 作業継続中の保持＋ループ状態の `.mso` 追従（V-23 / V-24。証跡 = `docs/evidence/20260908-held/`）
+
+- 発端（2026-09-08 実測ログ 08:06〜08:28Z、Pricefluctuation-app session=632eda45）: 品質ループの司令塔が codex を Monitor で待つ間、
+  `<task-notification>` 起床 → UserPromptSubmit → 短い応答 → Stop／終了検知 が 30 秒〜1 分ごとに繰り返され、そのたびにタイルが「完了」へ倒れ
+  完了トーストが出た。60 秒アイドルで入力待ち Notification → 「確認待ち」トースト。登録簿 status は応答後 `shell`（busy ではない）。
+  さらに `~/.claude/eval-loop/registry` はプラグイン v0.2 で廃止済み（ディレクトリ自体が無い）ためループバッジが出ていなかった。
+- 自動テスト: `tests/eval-loop-status.test.ts` を `.mso` 配置へ書き直し（16 件）、新規 `tests/state-store-held.test.ts`（8 件）・
+  `tests/liveness-monitor-held.test.ts`（6 件）。既存の期待値変更は `state-store-confirm-resume`（confirmSessions に `kind` が載る）1 か所。
+  `npm test`: **54 ファイル / 475 テスト全件 green**。`npm run typecheck` / `npm run lint` / `npm run build` すべて exit 0。
+- E2E（`node scripts/verify-loop-badge-e2e.mjs docs/evidence/20260908-held`。31 項目すべて OK）: 擬似プロジェクト 3 つに `.mso` の state と進捗ログ、
+  擬似登録簿（a=idle / b=busy / c=shell）を置き、専用インスタンスへ実 hook 形式のイベントを注入。
+
+| シナリオ | 結果 | 証跡 |
+|----------|------|------|
+| (a) `.mso/sessions/<sid>/state.json`（2 周目・best 78・generator 進捗ログ走行中）→ 「ループ 2/4・codex 実装中 0分・最高 78点」＋「作業継続中として保持」ログ | OK | `01-badges.png` / app.log |
+| (b) `.mso/agents/<agentId>/state.json`（fork。session_id で対応付け）→ 「ループ 1/4・採点中」 | OK | `01-badges.png` |
+| (c) ループ無し → バッジ無し | OK | `01-badges.png` |
+| (f) ループ進行中の Stop（登録簿 idle）→ 実行中のまま（3.5 秒後の前倒し判定を跨いでも）／入力待ち Notification → 確認待ちにならない／許可要求 → 確認待ちで掃引でも戻らない | OK | `02-held.png` / app.log「event 受信: Stop → running（実行中を維持: ループ進行中（…））」 |
+| (d) 進捗ログに PHASE_END → 「ループ 2/4・実装中・最高 78点」 | OK | 掃引 1 回で反映 |
+| (e) 終了（threshold_met・92 点。ended_at 無し → mtime）→ 「ループ終了・合格 92点」／31 分前に終わった fork は消える／終了後の Stop → 完了 | OK | `03-ended.png` |
+| (g) `<task-notification>` で起床 → 作業テキスト維持／Stop でも登録簿 `shell` の間は実行中／`idle` にしたら掃引の終了検知で完了（「保持を解除」「終了検知」） | OK | `04-released.png` / app.log |
+
+- 手動枠: 実ループでのトースト（保持中は出ず、ループ終了の Stop 後に「ループ終了・合格 NN点」付きで 1 回）は Windows 通知のため CDP では検証できない。
+  稼働アプリの `app.log` で「実行中を維持」「保持を解除 → 完了」を確認する。
+
+### 8.8 追記: 260908_2 残骸 state の無視・通知種別の公式化（V-23 / V-24。証跡 = `docs/evidence/20260909-remnant/`）
+
+- 発端（2026-09-09 10:39 ユーザー報告・実測）: Pricefluctuation-app のループは 2026-09-08 19:06 に threshold_met で終わっているのに、
+  タイルは「ループ 1/12・計画中（他 2 本）」で実行中のまま（0:14:56）。`.mso/agents/` に `active=true` / `task=""` / `iteration 0/12` の
+  事前作成 state が 3 つ残り、保持の根拠になっていた。プラグインの never_started GC を手動で実行すると閉じる（hook は 0.2.2 と同一内容）が、
+  稼働セッションでは効いていなかった（原因は未特定。プラグイン側の課題として記録）。
+- 参考（firecrawl 検索 3 件・公式 hooks reference の scrape）: Notification hook は `notification_type`（permission_prompt / idle_prompt /
+  elicitation_dialog / elicitation_url_dialog / agent_needs_input / agent_completed / quota_auto_resume_* 等）を持つ。SubagentStart / SubagentStop は
+  Task 起動で確実には発火しない（anthropics/claude-code#27755）。Stop は `stop_hook_active` / `last_assistant_message` を持つ（transcript は遅延しうる）。
+- 自動テスト: `tests/eval-loop-status.test.ts` に残骸の無視 2 件、`tests/state-store-held.test.ts` に notification_type の分類 3 件を追加。
+  `npm test`: **54 ファイル / 480 テスト全件 green**。`npm run typecheck` / `npm run lint` / `npm run build` すべて exit 0。
+- E2E（`node scripts/verify-loop-badge-e2e.mjs docs/evidence/20260909-remnant`。35 項目すべて OK）: (h) セッション c に task="" の残骸 state を
+  3 つ置いてもバッジ無し・Stop で完了（保持されない）。(f) `notification_type: idle_prompt` は文言が permission 風でも保持、`agent_needs_input` は確認待ち。
+  ログに「種別=idle(idle_prompt)」を併記。既存 (a)〜(g) は全件 OK のまま（本物のループ state には task を書くようにした）。
+- 稼働アプリ: 手動 GC の直後の掃引（01:44:44Z）で「保持を解除 → 終了検知 → 完了」を確認。新ビルドで再起動。
+
+### 8.9 追記: 260909_1 入力待ちの誤「切断」防止・SessionStart（V-24。証跡 = 単体テスト・実ログ）
+
+- 発端（2026-09-09 12:38 ユーザー報告）: instagram-app のタイルが「切断・8 分前」のまま。実ログ: 03:08:50Z idle_prompt → 確認待ち、
+  03:14:46Z「確認待ちから復帰 — 許可後に transcript が更新」（実体はユーザーの `/effort` `/model`。transcript に user レコード 3 件）、
+  03:30:01Z「切断検知 — transcript 更新途絶」（登録簿は idle・プロセス生存）。03:37:47Z に本当に終了（再起動）し新セッションが始まったが、
+  新セッションは最初のプロンプトまでイベントが無く、前セッションの「切断」が残った。
+- 自動テスト: 新規 `tests/liveness-monitor-idle.test.ts`（終端分類のローカルコマンド読み飛ばし・confirm 復帰の open 要件・findIdleConcluded・
+  切断判定の idle 除外）6 件、`tests/state-store-session-start.test.ts` 4 件。既存の期待値変更 2 か所（idle は切断しない）。
+  `npm test`: **56 ファイル / 490 テスト全件 green**。`npm run typecheck` / `npm run lint` / `npm run build` すべて exit 0。
+- E2E 回帰: `node scripts/verify-loop-badge-e2e.mjs docs/evidence/20260909-remnant` 35 項目すべて OK のまま。
+- 稼働アプリ: 新ビルドで再起動。起動時追補で登録済み全プロジェクトの `.claude/settings.json` に SessionStart が追記される（ログ「起動時追補」）。
+  SessionStart は新しい Claude Code セッションから発火する（既存セッションには効かない）。
