@@ -10,7 +10,8 @@
     "lint": "eslint src tests scripts",
     "test": "vitest run",
     "start": "electron .",
-    "smoke:win32": "node scripts/win32-smoke.mjs"
+    "smoke:win32": "node scripts/win32-smoke.mjs",
+    "diagnose": "node scripts/diagnose.mjs"
   },
   "dependencies": {
     "koffi": "^2.9.0"

@@ -135,6 +135,7 @@ start-app.bat
 | `node scripts/verify-liveness-registry-e2e.mjs [出力先]` | 非デモの専用インスタンスに実 hook 形式のイベントを注入し、実登録簿（`~/.claude/sessions`）に無い架空セッションが掃引 2 回で終了確定 → 切断 → 破棄され分割が解けること、確認待ち → transcript 更新で「実行中」へ復帰することを実測する（登録簿に生きている claude が必要。260904_1） |
 | `node scripts/verify-arrange-e2e.mjs [出力先]` | デモ（12 タイル）を CDP で開き、自動整列で接続中 10 件が先頭・未接続 2 件が末尾になること、再押下で「整列済み」案内、合成 DragEvent によるタイルの D&D（手前／直後の両方向・自分自身へのドロップ無視）、`projects.json` への並び順の永続化、内部ドラッグ中は登録用オーバーレイが出ず外部ファイルのドロップでは出ることを確認し、スクリーンショットを残す（260906_1） |
 | `node scripts/probe-jev.mjs [出力先 JSON]` | 実 Jev API に 4 判定（返答待ち／危険度／作業テキスト／停滞）の代表入力 14 件を投げ、確率と本アプリの解釈・応答時間を表示する（キーは env / .typesafe.env から。出力に出さない）（260922_2） |
+| `npm run diagnose`（`npm run diagnose -- 24` で直近 24 時間） | 自己診断（260927_1）。ビルドの新しさ・設定・受信サーバの応答・hooks の登録状況・Jev の実応答時間・claude CLI・登録簿・transcript・直近ログの集計・状態の往復（flip-flop）・保存した表示と実データの食い違い、を一度に確認して OK / WARN / NG で出す。第 2 引数に JSON の保存先を渡せる。終了コードは NG があれば 1 |
 | `node scripts/verify-session-snapshot-e2e.mjs [出力先]` | 専用 dataDir の実 Electron を起動 → 確認待ち・実行中を作る → 終了 → 再起動、で「確認待ちのまま復元」「進んだセッションは作り直し」「終了済みは復元しない」を実測する（260922_7） |
 
 検証・証跡用の起動フラグ（`npx electron . <flags>`）:

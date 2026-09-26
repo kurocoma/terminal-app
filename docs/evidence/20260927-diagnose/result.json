@@ -1,0 +1,284 @@
+{
+  "at": "2026-09-26T21:55:55.327Z",
+  "hours": 24,
+  "level": "ng",
+  "checks": [
+    {
+      "name": "ビルド",
+      "level": "ok",
+      "detail": "dist は最新（1分前）"
+    },
+    {
+      "name": "設定",
+      "level": "ok",
+      "detail": "登録 22 件・ポート 41321・Jev 自動リネーム on"
+    },
+    {
+      "name": "受信サーバ",
+      "level": "ok",
+      "detail": "ポート 41321 が応答（HTTP 204）"
+    },
+    {
+      "name": "hooks",
+      "level": "ok",
+      "detail": "登録 22 件すべてに Stop / Notification / UserPromptSubmit が入っている"
+    },
+    {
+      "name": "Jev",
+      "level": "ok",
+      "detail": "応答 277ms・判定可（asks_user=0.84 / pending=true）"
+    },
+    {
+      "name": "claude CLI",
+      "level": "ok",
+      "detail": "2.1.283 (Claude Code)"
+    },
+    {
+      "name": "登録簿",
+      "level": "ok",
+      "detail": "25 件（busy 5）"
+    },
+    {
+      "name": "transcript",
+      "level": "ok",
+      "detail": "20/22 プロジェクトに記録あり"
+    },
+    {
+      "name": "イベント受信",
+      "level": "ok",
+      "detail": "UserPromptSubmit 69 / Stop 52 / Notification 46"
+    },
+    {
+      "name": "Jev 判定",
+      "level": "ok",
+      "detail": "返答待ち判定 153 / 名前整合判定 35 / 作業テキスト判定 20 / 危険度判定 8 / 返答待ち判定を見送り 1 / 停滞判定 1"
+    },
+    {
+      "name": "状態の往復",
+      "level": "ng",
+      "detail": "113 回 — 0a06ddae 22回(確認待ちから復帰 → 終了検知) / 3998ea06 19回(確認待ちから復帰 → 終了検知) / 7077f324 16回(確認待ちから復帰 → 終了検知)"
+    },
+    {
+      "name": "警告・エラー",
+      "level": "warn",
+      "detail": "20 件 — 最新: 切断検知: chatwork (session=643b7c5e-bbe2-4647-99db-b2ed9ab5bcc9) — transcript 更新途絶"
+    },
+    {
+      "name": "表示の保存",
+      "level": "ok",
+      "detail": "18 件・保存 たった今"
+    },
+    {
+      "name": "表示と実データ",
+      "level": "ok",
+      "detail": "食い違いなし"
+    }
+  ],
+  "summary": {
+    "lines": 1030,
+    "since": 1790373355327,
+    "kinds": {
+      "確認待ちから復帰": 126,
+      "終了検知": 117,
+      "Jev 返答待ち判定": 153,
+      "前面化 成功": 129,
+      "event 受信": 167,
+      "ui-latency": 167,
+      "Jev 名前整合判定": 35,
+      "Jev 作業テキスト判定": 20,
+      "前面化 失敗": 3,
+      "Jev 危険度判定": 8,
+      "Jev 返答待ち判定を見送り": 1,
+      "切断検知": 33,
+      "切断から実行中へ復帰": 32,
+      "完了から実行中へ復帰": 11,
+      "ループ進捗バッジ 表示": 6,
+      "並び順変更": 1,
+      "セッション終了を確認（登録簿にプロセスなし）": 5,
+      "実行中のまま終了 → 切断表示": 3,
+      "終了済みセッションの記録を破棄（同じプロジェクトに生存あり）": 5,
+      "ループ進捗バッジ 消滅": 4,
+      "通知クリックで前面化 成功": 1,
+      "Jev": 1,
+      "Jev 停滞判定": 1,
+      "event 破棄": 1
+    },
+    "events": {
+      "UserPromptSubmit": 69,
+      "Stop": 52,
+      "Notification": 46
+    },
+    "judgments": {
+      "返答待ち判定": 153,
+      "名前整合判定": 35,
+      "作業テキスト判定": 20,
+      "危険度判定": 8,
+      "返答待ち判定を見送り": 1,
+      "停滞判定": 1
+    },
+    "problems": [
+      {
+        "at": 1790392729303,
+        "level": "WARN",
+        "text": "切断検知: 日別レポート作成 (session=e292b9f7-f19a-4372-86c0-02912384d8e9) — transcript 更新途絶"
+      },
+      {
+        "at": 1790393554707,
+        "level": "WARN",
+        "text": "切断検知: chatwork (session=643b7c5e-bbe2-4647-99db-b2ed9ab5bcc9) — transcript 更新途絶"
+      },
+      {
+        "at": 1790396331578,
+        "level": "WARN",
+        "text": "切断検知: 日別レポート作成 (session=e292b9f7-f19a-4372-86c0-02912384d8e9) — transcript 更新途絶"
+      },
+      {
+        "at": 1790397142076,
+        "level": "WARN",
+        "text": "切断検知: chatwork (session=643b7c5e-bbe2-4647-99db-b2ed9ab5bcc9) — transcript 更新途絶"
+      },
+      {
+        "at": 1790399933582,
+        "level": "WARN",
+        "text": "切断検知: 日別レポート作成 (session=e292b9f7-f19a-4372-86c0-02912384d8e9) — transcript 更新途絶"
+      },
+      {
+        "at": 1790400744075,
+        "level": "WARN",
+        "text": "切断検知: chatwork (session=643b7c5e-bbe2-4647-99db-b2ed9ab5bcc9) — transcript 更新途絶"
+      },
+      {
+        "at": 1790403535672,
+        "level": "WARN",
+        "text": "切断検知: 日別レポート作成 (session=e292b9f7-f19a-4372-86c0-02912384d8e9) — transcript 更新途絶"
+      },
+      {
+        "at": 1790404346157,
+        "level": "WARN",
+        "text": "切断検知: chatwork (session=643b7c5e-bbe2-4647-99db-b2ed9ab5bcc9) — transcript 更新途絶"
+      },
+      {
+        "at": 1790407139683,
+        "level": "WARN",
+        "text": "切断検知: 日別レポート作成 (session=e292b9f7-f19a-4372-86c0-02912384d8e9) — transcript 更新途絶"
+      },
+      {
+        "at": 1790407950100,
+        "level": "WARN",
+        "text": "切断検知: chatwork (session=643b7c5e-bbe2-4647-99db-b2ed9ab5bcc9) — transcript 更新途絶"
+      },
+      {
+        "at": 1790410741545,
+        "level": "WARN",
+        "text": "切断検知: 日別レポート作成 (session=e292b9f7-f19a-4372-86c0-02912384d8e9) — transcript 更新途絶"
+      },
+      {
+        "at": 1790411551981,
+        "level": "WARN",
+        "text": "切断検知: chatwork (session=643b7c5e-bbe2-4647-99db-b2ed9ab5bcc9) — transcript 更新途絶"
+      },
+      {
+        "at": 1790414343518,
+        "level": "WARN",
+        "text": "切断検知: 日別レポート作成 (session=e292b9f7-f19a-4372-86c0-02912384d8e9) — transcript 更新途絶"
+      },
+      {
+        "at": 1790415153965,
+        "level": "WARN",
+        "text": "切断検知: chatwork (session=643b7c5e-bbe2-4647-99db-b2ed9ab5bcc9) — transcript 更新途絶"
+      },
+      {
+        "at": 1790417945423,
+        "level": "WARN",
+        "text": "切断検知: 日別レポート作成 (session=e292b9f7-f19a-4372-86c0-02912384d8e9) — transcript 更新途絶"
+      },
+      {
+        "at": 1790418755842,
+        "level": "WARN",
+        "text": "切断検知: chatwork (session=643b7c5e-bbe2-4647-99db-b2ed9ab5bcc9) — transcript 更新途絶"
+      },
+      {
+        "at": 1790421532327,
+        "level": "WARN",
+        "text": "切断検知: 日別レポート作成 (session=e292b9f7-f19a-4372-86c0-02912384d8e9) — transcript 更新途絶"
+      },
+      {
+        "at": 1790422342747,
+        "level": "WARN",
+        "text": "切断検知: chatwork (session=643b7c5e-bbe2-4647-99db-b2ed9ab5bcc9) — transcript 更新途絶"
+      },
+      {
+        "at": 1790425134201,
+        "level": "WARN",
+        "text": "切断検知: 日別レポート作成 (session=e292b9f7-f19a-4372-86c0-02912384d8e9) — transcript 更新途絶"
+      },
+      {
+        "at": 1790425944622,
+        "level": "WARN",
+        "text": "切断検知: chatwork (session=643b7c5e-bbe2-4647-99db-b2ed9ab5bcc9) — transcript 更新途絶"
+      }
+    ],
+    "flipFlops": [
+      {
+        "session": "0a06ddae",
+        "count": 22,
+        "lastAt": 1790459549727,
+        "pattern": "確認待ちから復帰 → 終了検知"
+      },
+      {
+        "session": "3998ea06",
+        "count": 19,
+        "lastAt": 1790447346589,
+        "pattern": "確認待ちから復帰 → 終了検知"
+      },
+      {
+        "session": "7077f324",
+        "count": 16,
+        "lastAt": 1790446836352,
+        "pattern": "確認待ちから復帰 → 終了検知"
+      },
+      {
+        "session": "dd24342d",
+        "count": 16,
+        "lastAt": 1790454071228,
+        "pattern": "確認待ちから復帰 → 終了検知"
+      },
+      {
+        "session": "1881444e",
+        "count": 15,
+        "lastAt": 1790452540352,
+        "pattern": "終了検知 → 完了から実行中へ復帰"
+      },
+      {
+        "session": "e292b9f7",
+        "count": 8,
+        "lastAt": 1790449342851,
+        "pattern": "確認待ちから復帰 → 終了検知"
+      },
+      {
+        "session": "643b7c5e",
+        "count": 8,
+        "lastAt": 1790458949057,
+        "pattern": "終了検知 → 確認待ちから復帰"
+      },
+      {
+        "session": "c6734599",
+        "count": 4,
+        "lastAt": 1790454881687,
+        "pattern": "確認待ちから復帰 → 終了検知"
+      },
+      {
+        "session": "6d7b9a8c",
+        "count": 3,
+        "lastAt": 1790459489688,
+        "pattern": "確認待ちから復帰 → 終了検知"
+      },
+      {
+        "session": "f68f8f8f",
+        "count": 2,
+        "lastAt": 1790455091810,
+        "pattern": "確認待ちから復帰 → 終了検知"
+      }
+    ]
+  }
+}
