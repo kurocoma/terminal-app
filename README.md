@@ -4,6 +4,7 @@ Claude Code / Codex の並行セッションを監視する Windows 11 常駐タ
 **どのセッションが止まったかをひと目で識別し、1 クリックで対象ウィンドウ（Cursor / ターミナル）に切り替える。**
 
 - **引き継ぎ: `docs/handover-20260928-codex.md`**（別の担当者・Codex が最初に読む。残課題・作業ルール・環境の勘所）
+- [Cursor → Orca の移行記録](docs/cursor-to-orca-migration.md)／[クロコマース向けワンショット依頼文](docs/kurocommerce-orca-one-shot.md)
 - 要件: `docs/spec.md`（REQ / NFR / AC / OPEN の正本）
 - 設計: `docs/design.md`（モジュール分割・hooks 連携・UI はモック面 1a〜1f 準拠）
 - 検証: `docs/verification.md`（V-01〜V-20）／実行記録: `docs/verification-results.md`
