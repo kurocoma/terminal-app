@@ -6,13 +6,14 @@ import * as path from "path";
  * - 出力先: <dataDir>/logs/app.log
  * - ローテーション: 日次（日付が変わったら app-YYYYMMDD.log へ退避）・直近 7 日分のみ保持
  * - 個人利用前提のため同期 I/O の簡易実装とする（書き込み量は少ない）
+ * - 通常はファイルだけへ出力する。親の Codex 等の対話画面へログを混ぜない
  */
 export class Logger {
   private readonly logDir: string;
   private readonly logFile: string;
   private currentDate: string;
 
-  constructor(dataDir: string, private readonly mirrorToConsole = true) {
+  constructor(dataDir: string, private readonly mirrorToConsole = false) {
     this.logDir = path.join(dataDir, "logs");
     this.logFile = path.join(this.logDir, "app.log");
     this.currentDate = this.today();

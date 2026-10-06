@@ -183,7 +183,7 @@ function cwdBelongsTo(cwd: string, projectPath: string): boolean {
 }
 
 /** JSONL 末尾チャンクを行単位でパースし、新しい順に返す（先頭行はチャンク境界で欠けうるため parse 失敗は捨てる） */
-function tailRecords(filePath: string): Array<Record<string, unknown>> {
+export function tailRecords(filePath: string, tailBytes: number = TAIL_BYTES): Array<Record<string, unknown>> {
   let fd: number;
   try {
     fd = fs.openSync(filePath, "r");
@@ -192,7 +192,7 @@ function tailRecords(filePath: string): Array<Record<string, unknown>> {
   }
   try {
     const size = fs.fstatSync(fd).size;
-    const readLen = Math.min(size, TAIL_BYTES);
+    const readLen = Math.min(size, tailBytes);
     const buf = Buffer.alloc(readLen);
     fs.readSync(fd, buf, 0, readLen, size - readLen);
     const lines = buf.toString("utf8").split("\n");

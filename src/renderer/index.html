@@ -117,6 +117,17 @@
         </div>
 
         <h3>プロジェクト</h3>
+        <!-- クリック先の一括変更（261005_1）: 全プロジェクトに適用し、以後の新規登録の既定にもなる -->
+        <div class="setting-row">
+          <div class="setting-label">クリックで開くアプリ（一括）
+            <span class="setting-desc">全プロジェクトに適用し、新しく登録するプロジェクトの既定にもなる</span>
+          </div>
+          <div class="segmented" id="default-target-seg">
+            <button data-target-choice="cursor">Cursor</button>
+            <button data-target-choice="orca">Orca</button>
+            <button data-target-choice="terminal">ターミナル</button>
+          </div>
+        </div>
         <p class="settings-note">クリックで開くアプリをプロジェクトごとに選択。行末のボタンで登録解除。</p>
         <div id="project-list"></div>
         <button id="btn-more-projects" class="btn-more" hidden></button>
@@ -153,6 +164,30 @@
         <div class="dialog-actions">
           <button type="button" id="rename-cancel" class="btn-secondary">キャンセル</button>
           <button type="submit" id="rename-save" class="btn-primary">保存</button>
+        </div>
+      </form>
+    </div>
+    <!-- タイルのプレビュー: マウスを置くと「あなたの指示」（261005_3）と、Orca 対象なら Orca ターミナルの末尾（261005_2）を出す -->
+    <div id="orca-peek" hidden>
+      <div id="peek-instr" class="instr-list" hidden></div>
+      <pre id="orca-peek-text" hidden></pre>
+    </div>
+
+    <!-- Orca: 画面を見て返信（261005_2）。タイル右クリックから開く。画面は約 2 秒ごとに更新 -->
+    <div id="orca-dialog" hidden>
+      <form id="orca-form" class="dialog-card orca-card">
+        <div id="orca-title" class="dialog-title">Orca</div>
+        <div id="orca-instr" class="instr-list" hidden></div>
+        <pre id="orca-screen"></pre>
+        <div id="orca-note" class="dialog-hint"></div>
+        <div class="orca-reply">
+          <input id="orca-input" type="text" maxlength="4000" autocomplete="off" spellcheck="false" placeholder="返信（Enter で送信）" />
+          <button type="submit" id="orca-send" class="btn-primary">送信</button>
+        </div>
+        <div class="dialog-actions">
+          <button type="button" id="orca-esc" class="btn-secondary" title="実行中の処理を止める（Esc キーを送る）">中断（Esc）</button>
+          <button type="button" id="orca-open" class="btn-secondary">Orca で開く</button>
+          <button type="button" id="orca-close" class="btn-secondary">閉じる</button>
         </div>
       </form>
     </div>

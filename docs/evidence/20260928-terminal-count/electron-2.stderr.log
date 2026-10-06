@@ -1,0 +1,5 @@
+(node:85140) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `electron --trace-warnings ...` to show where the warning was created)
+
+DevTools listening on ws://127.0.0.1:57740/devtools/browser/9288e273-392e-4ade-b16d-81905291918d
+Error: Failed to sync '<stdout>': ファンクションが間違っています。

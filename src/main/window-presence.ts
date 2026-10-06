@@ -1,5 +1,5 @@
 /**
- * 未接続タイル（260903_1）: 各プロジェクトについて「クリックで開く対象アプリ（Cursor / ターミナル）の
+ * 未接続タイル（260903_1）: 各プロジェクトについて「クリックで開く対象アプリ（Cursor / Orca / ターミナル）の
  * ウィンドウが今あるか」を定期的に判定し、無いタイルを灰色表示・非表示の対象にする。
  *
  * - 判定条件は前面化（focusProjectWindow）・切断検知（liveness-monitor の windowPresent）と同じ
@@ -12,6 +12,7 @@
  */
 import * as path from "path";
 import type { Project } from "../shared/types";
+import { normalizePath } from "./state-store";
 import { hasWindowFor, type TopLevelWindow } from "./window-control";
 
 /** 検証用の env 上書き（liveness-monitor と同系の検証フラグ。実運用では未設定 = 既定値） */
@@ -26,13 +27,32 @@ export const WINDOW_POLL_INTERVAL_MS = envMs("TERMINAL_APP_WINDOW_POLL_MS", 5_00
 /** key = projectId、value = 対象アプリのウィンドウが見つかったか */
 export type WindowPresence = Record<string, boolean>;
 
-/** 登録済み全プロジェクトのウィンドウ有無を一括判定する（列挙結果は 1 回分を使い回す） */
-export function computeWindowPresence(projects: readonly Project[], windows: readonly TopLevelWindow[]): WindowPresence {
+/**
+ * 登録済み全プロジェクトのウィンドウ有無を一括判定する（列挙結果は 1 回分を使い回す）。
+ * Orca 対象（261005_1）は「Orca の窓がある」かつ「Orca で開いているフォルダ一覧（orcaPaths。正規化済み）に
+ * 登録フォルダがある」で接続あり。orcaPaths = null（CLI で取得できなかった）は窓の有無だけで判定する（灰色にしない側）
+ */
+export function computeWindowPresence(
+  projects: readonly Project[],
+  windows: readonly TopLevelWindow[],
+  orcaPaths: ReadonlySet<string> | null = null,
+): WindowPresence {
   const out: WindowPresence = {};
   for (const p of projects) {
-    out[p.id] = hasWindowFor(p.clickTarget, path.basename(p.path), windows);
+    out[p.id] = projectWindowPresent(p, windows, orcaPaths);
   }
   return out;
+}
+
+/** 1 プロジェクト分の判定。前面化・切断検知（index.ts）からも同じ規則で使う */
+export function projectWindowPresent(
+  project: Project,
+  windows: readonly TopLevelWindow[],
+  orcaPaths: ReadonlySet<string> | null,
+): boolean {
+  if (!hasWindowFor(project.clickTarget, path.basename(project.path), windows)) return false;
+  if (project.clickTarget !== "orca" || orcaPaths === null) return true;
+  return orcaPaths.has(normalizePath(project.path));
 }
 
 /** 表示に影響する変化が無ければ broadcast を省く（5 秒ごとの再描画を避ける）ための同値判定 */

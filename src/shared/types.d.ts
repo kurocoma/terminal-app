@@ -3,7 +3,8 @@
  * 対応設計: design.md 9 章（データ設計）・5 章（状態管理）
  */
 
-export type ClickTarget = "cursor" | "terminal";
+/** クリックで前面化する対象アプリ。orca = Orca（stablyai/orca。261005_1） */
+export type ClickTarget = "cursor" | "terminal" | "orca";
 
 /**
  * 内部状態 = 待機（補助状態）＋確定 4 状態（design.md 5.1）＋切断（260712_2）。
@@ -75,12 +76,23 @@ export interface AppConfig {
    * Claude Sonnet の提案で自動的に付け替える。false で止められる（config.json を編集。既定 true）
    */
   autoRename?: boolean;
+  /** Codex のローカル履歴を読み取り、登録済みプロジェクトのタイルに表示する。既定 true */
+  monitorCodex?: boolean;
+  /**
+   * 新規登録するプロジェクトのクリック先（261005_1）。設定画面の「一括変更」で選んだ値を引き継ぐ。
+   * 未設定 = cursor（従来どおり）
+   */
+  defaultClickTarget?: ClickTarget;
 }
 
 /** セッション状態（メモリのみ・揮発。design.md 9 章） */
 export interface SessionView {
   sessionId: string;
   projectId: string;
+  /** 未指定は従来の Claude Code。Codex は独立した読み取り監視から届く */
+  provider?: "claude" | "codex";
+  /** 終了を確認したターミナルの履歴。生存・未確認の場合は省略し、分割表示の対象から外す */
+  terminalClosed?: boolean;
   state: SessionState;
   /** 最終イベント時刻（epoch ms）。相対時刻表示の起点 */
   lastEventAt: number;
@@ -178,6 +190,11 @@ export interface Snapshot {
    * renderer は「接続あり」扱いにする（安全側）。未接続の最終判定は renderer の isUnlinked（format.ts）
    */
   windowPresence: Record<string, boolean>;
+  /**
+   * Orca でスリープ中のプロジェクト（261005_4）。key = projectId。Orca 対象で、Orca に登録済みかつ
+   * 生きているターミナルが 0 のとき true。renderer は未接続（灰色）の代わりに「スリープ中」と表示する
+   */
+  sleeping?: Record<string, boolean>;
 }
 
 export interface RegisterResult {
@@ -207,10 +224,40 @@ export interface OpResult {
   error?: string;
 }
 
+/** focusProject のオプション（260925_1: タッチ操作時のポインター迷子対策） */
+export interface FocusProjectOptions {
+  /** タッチ／ペンでタイルを押した（前面化後にポインターを対象ウィンドウへ移す） */
+  viaTouch?: boolean;
+  /**
+   * 押したタイル（分割タイルはその枠）のセッション（261005_1）。Orca では窓が 1 枚のため、
+   * このセッションが動いている Orca 内のターミナルタブへ切り替える手掛かりにする
+   */
+  sessionId?: string;
+}
+
 export interface FocusResult {
   ok: boolean;
   message?: string;
 }
+
+/** Orca のターミナル画面（261005_2） */
+export interface OrcaScreenResult {
+  ok: boolean;
+  message?: string;
+  lines?: string[];
+  /** セッション ID で正確に特定できたか。false（推定）のときは返信・中断を送らない */
+  exact?: boolean;
+}
+
+/** 指示の履歴の 1 件（261005_3） */
+export interface InstructionItem {
+  text: string;
+  /** 送った時刻（epoch ms）。不明なら省略 */
+  at?: number;
+}
+
+/** Orca へ送る入力（261005_2）。escape = 中断（Esc キー） */
+export type OrcaInputPayload = { kind: "text"; text: string } | { kind: "escape" };
 
 /** preload が window.terminalApp として公開する API */
 export interface TerminalAppApi {
@@ -227,6 +274,16 @@ export interface TerminalAppApi {
   dndLog(msg: string): void;
   unregisterProject(id: string): Promise<OpResult>;
   setClickTarget(id: string, target: ClickTarget): Promise<void>;
+  /** 全プロジェクトのクリック先を一括変更し、以後の新規登録の既定にもする（261005_1） */
+  setAllClickTargets(target: ClickTarget): Promise<void>;
+  /** 指示の履歴（261005_3）: そのセッションでユーザーが送った指示を新しい順に（sessionId 未指定は代表セッション） */
+  sessionInstructions(id: string, sessionId?: string): Promise<{ ok: boolean; items: InstructionItem[] }>;
+  /** Orca のターミナル画面を読む（261005_2。sessionId 未指定は代表セッション） */
+  orcaReadScreen(id: string, sessionId?: string): Promise<OrcaScreenResult>;
+  /** Orca のターミナルへ返信・中断を送る（261005_2。セッションを正確に特定できたときだけ送る） */
+  orcaSend(id: string, sessionId: string | undefined, input: OrcaInputPayload): Promise<FocusResult>;
+  /** 右クリック →「Orca: 画面を見て返信…」（main → renderer） */
+  onOrcaPanelRequest(cb: (projectId: string, sessionId: string | null) => void): void;
   /** 手動ステータスの割り当て（260727_1）。null = 解除 */
   setProjectStatus(id: string, status: string | null): Promise<void>;
   /** 手動ステータスの選択肢一覧を丸ごと更新（260727_1）。追加・削除とも本 API に集約 */
@@ -243,7 +300,12 @@ export interface TerminalAppApi {
   setTheme(theme: ThemeSetting): Promise<void>;
   setAlwaysOnTopDefault(value: boolean): Promise<void>;
   setPinned(value: boolean): Promise<void>;
-  focusProject(id: string): Promise<FocusResult>;
+  focusProject(id: string, options?: FocusProjectOptions): Promise<FocusResult>;
+  /**
+   * タイル以外の場所でタッチ／ペンの接触が終わった（260925_2: Windows が隠したポインターを再表示する。
+   * 位置は変えない。戻り値なし・待たない）
+   */
+  notifyTouchEnded(): void;
   /**
    * タイルの右クリックメニューを表示（260712_2: 再接続・表示クリア・登録解除）。
    * sessionId は分割タイル（260904_1 #3）のときだけ渡す — 「この枠を消す」の対象になる

@@ -76,6 +76,8 @@ export function resolveLaunchCommand(
     const exe = cursorCandidates(deps).find(deps.exists);
     return exe !== undefined ? { exe, args: [projectPath] } : null;
   }
+  // Orca は exe 起動でフォルダを開けない（起動引数は文書ファイルのみ）。CLI 経由の orca.ts launchInOrca を使う
+  if (target === "orca") return null;
   const exe = terminalCandidates(deps).find(deps.exists);
   return exe !== undefined ? { exe, args: ["-d", projectPath] } : null;
 }
@@ -93,6 +95,28 @@ function fileExists(p: string): boolean {
   }
 }
 
+/** Codex のタスク用シェルから起動した場合、その端末設定を対話アプリへ持ち出さない。 */
+function launchEnvironment(env: ResolveDeps["env"]): ResolveDeps["env"] {
+  const codexMarkers = new Set(["CODEX_CI", "CODEX_SESSION_ID", "CODEX_THREAD_ID"]);
+  const entries = Object.entries(env);
+  const fromCodex = entries.some(([key, value]) => codexMarkers.has(key.toUpperCase()) && !!value);
+  const childEnv = { ...env };
+  if (!fromCodex) return childEnv;
+
+  for (const [key, value] of entries) {
+    const name = key.toUpperCase();
+    if (
+      codexMarkers.has(name) ||
+      (name === "NO_COLOR" && value === "1") ||
+      (name === "TERM" && value === "dumb") ||
+      (name === "FORCE_COLOR" && value === "0")
+    ) {
+      delete childEnv[key];
+    }
+  }
+  return childEnv;
+}
+
 /**
  * 対象アプリをプロジェクトフォルダ付きで起動する（detach して本アプリと生存を切り離す）。
  * 起動の成否 = spawn の受理まで（アプリ側の初期化失敗までは追わない）
@@ -105,11 +129,17 @@ export function launchProjectApp(target: ClickTarget, projectPath: string): Laun
       message:
         target === "cursor"
           ? "Cursor が見つかりません（Cursor.exe を解決できませんでした）"
-          : "Windows Terminal（wt.exe）が見つかりません",
+          : target === "orca"
+            ? "Orca の立ち上げは Orca の CLI 経由で行います"
+            : "Windows Terminal（wt.exe）が見つかりません",
     };
   }
   try {
-    const child = spawn(cmd.exe, cmd.args, { detached: true, stdio: "ignore" });
+    const child = spawn(cmd.exe, cmd.args, {
+      detached: true,
+      stdio: "ignore",
+      env: launchEnvironment(process.env),
+    });
     child.unref();
     return { ok: true };
   } catch (e) {

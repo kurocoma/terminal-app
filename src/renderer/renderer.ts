@@ -3,7 +3,7 @@
  * ES モジュールとしてビルドする（index.html で type="module" 読み込み）。表示整形の純関数は
  * ./format.ts に分離（単体テスト対象）。main とは preload の window.terminalApp 経由でのみ通信する。
  */
-import { autoArrangeIds, confirmFirstIds, confirmLabel, confirmTilesFirst, fmtElapsed, fmtRelative, fmtStatusCounts, fmtUnlinkedLabel, isUnlinked, moveProjectId, projectConfirming, projectLinked, tileAlertText } from "./format.js";
+import { autoArrangeIds, confirmFirstIds, confirmLabel, confirmTilesFirst, fmtElapsed, fmtRelative, fmtStatusCounts, fmtUnlinkedLabel, isUnlinked, moveProjectId, projectConfirming, tileAlertText } from "./format.js";
 
 type Api = Window["terminalApp"];
 type Snapshot = Awaited<ReturnType<Api["getSnapshot"]>>;
@@ -72,14 +72,23 @@ const STATE_META: Record<SessionState, { label: string; icon: string; cls: strin
 };
 
 /** 未接続タイルのツールチップ（260903_1）。復帰導線（右クリック →「立ち上げる」）まで案内する */
+const CLICK_TARGETS: ClickTarget[] = ["cursor", "orca", "terminal"];
+
+/** Orca でスリープ中のタイル（261005_4） */
+const SLEEPING_ICON = "☾";
+const SLEEPING_HINT = "Orca でスリープ中です（ターミナルを閉じて休ませている状態）。右クリック →「起こす」で再開できます";
+const TARGET_LABEL: Record<ClickTarget, string> = { cursor: "Cursor", orca: "Orca", terminal: "ターミナル" };
+
 const UNLINKED_HINT: Record<ClickTarget, string> = {
   cursor: "Cursor でこのフォルダを開いているウィンドウが見つかりません。右クリック →「立ち上げる」で開けます",
+  orca: "Orca でこのフォルダが開かれていません（Orca が起動していないか、ワークスペースに無い）。右クリック →「立ち上げる」で開けます",
   terminal: "このフォルダを開いているターミナルのウィンドウが見つかりません。右クリック →「立ち上げる」で開けます",
 };
 
 /** 未接続タイルの件数（260903_1）。ステータスバーのトグルラベル用 */
 function countUnlinked(s: Snapshot): number {
-  return s.projects.filter((p) => isUnlinked(s.windowPresence[p.id], s.sessions[p.id]?.state)).length;
+  return buildTileSpecs(s).filter(({ project, session }) =>
+    isUnlinked(s.windowPresence[project.id], session?.state, session?.provider, session?.terminalClosed)).length;
 }
 
 function tileStatusText(session: SessionView | undefined): string {
@@ -98,7 +107,8 @@ function tileStatusText(session: SessionView | undefined): string {
 /** タイルのステータス行を更新（renderGrid と 1 秒毎の時刻更新で共用。差分がある時だけ DOM を触る） */
 function updateTileStatus(el: HTMLElement, session: SessionView | undefined): void {
   const statusEl = el.querySelector(".tile-status") as HTMLElement;
-  const text = tileStatusText(session);
+  // スリープ中（261005_4）は経過時間の更新でも上書きしない
+  const text = el.classList.contains("is-sleeping") ? "スリープ中（Orca）" : tileStatusText(session);
   if (statusEl.textContent !== text) statusEl.textContent = text;
 }
 
@@ -140,7 +150,11 @@ function createTile(project: Project, sessionId?: string): HTMLButtonElement {
   const seq = document.createElement("span");
   seq.className = "tile-seq";
   seq.hidden = true;
-  nameRow.append(name, seq);
+  const provider = document.createElement("span");
+  provider.className = "tile-provider";
+  provider.textContent = "Codex";
+  provider.hidden = true;
+  nameRow.append(name, seq, provider);
   const badge = document.createElement("span");
   badge.className = "tile-badge";
   badge.hidden = true;
@@ -184,10 +198,18 @@ function createTile(project: Project, sessionId?: string): HTMLButtonElement {
   center.append(spinner, icon, work);
   el.append(glow, head, center, status);
 
-  el.addEventListener("click", () => {
+  el.addEventListener("click", (e) => {
     // クリックで前面化（REQ-05）。分割タイルもプロジェクトのウィンドウを前面化する（Cursor 内の
-    // 特定ターミナルまでは外から選べない）。失敗メッセージは main からステータスバーへ届く
-    void api.focusProject(project.id);
+    // 特定ターミナルまでは外から選べない。Orca は押した枠のセッションのタブへ切り替える = 261005_1）。
+    // 失敗メッセージは main からステータスバーへ届く。
+    // タッチ／ペンのときは main にそれを伝え、ポインターを対象ウィンドウへ連れて行ってもらう
+    // （260925_1: タッチ後は Windows がポインターを隠す＋別画面に残すため迷子になる）
+    const pointerType = (e as PointerEvent).pointerType;
+    const viaTouch = pointerType === "touch" || pointerType === "pen";
+    void api.focusProject(project.id, {
+      ...(viaTouch ? { viaTouch: true } : {}),
+      ...(sessionId !== undefined ? { sessionId } : {}),
+    });
   });
   el.addEventListener("contextmenu", (e) => {
     // 右クリック = プロジェクト操作メニュー（260712_2: 再接続・表示クリア・登録解除）。
@@ -197,6 +219,7 @@ function createTile(project: Project, sessionId?: string): HTMLButtonElement {
     void api.showTileMenu(project.id, sessionId);
   });
   wireTileDrag(el, project.id);
+  wireTilePeek(el, project.id, sessionId);
   return el;
 }
 
@@ -290,8 +313,8 @@ function autoArrange(): void {
   const linked: Record<string, boolean> = {};
   for (const p of s.projects) {
     const members = s.splitSessions[p.id];
-    const states = members !== undefined && members.length >= 2 ? members.map((m) => m.state) : [s.sessions[p.id]?.state];
-    linked[p.id] = projectLinked(s.windowPresence[p.id], states);
+    const sessions = members !== undefined && members.length >= 2 ? members : [s.sessions[p.id]];
+    linked[p.id] = sessions.some((session) => !isUnlinked(s.windowPresence[p.id], session?.state, session?.provider, session?.terminalClosed));
   }
   const ids = s.projects.map((p) => p.id);
   const linkedCount = ids.filter((id) => linked[id]).length;
@@ -370,13 +393,15 @@ function renderGrid(): void {
     tileSessions.set(spec.key, session);
     const state = session === undefined ? "waiting" : session.state;
     // 未接続（260903_1）: 対象アプリのウィンドウ無し＋実行中／確認待ちでない → 灰色。非表示設定なら隠す
-    const unlinked = isUnlinked(snap!.windowPresence[project.id], state);
-    const cls = `tile ${STATE_META[state].cls}${unlinked ? " is-unlinked" : ""}${spec.seq !== undefined ? " is-split" : ""}`;
+    // Orca でスリープ中（261005_4）: 未接続（灰色）の代わりに「スリープ中」と出す。実行中・確認待ちの表示は優先する
+    const sleeping = snap!.sleeping?.[project.id] === true && state !== "running" && state !== "confirm";
+    const unlinked = !sleeping && isUnlinked(snap!.windowPresence[project.id], state, session?.provider, session?.terminalClosed);
+    const cls = `tile ${STATE_META[state].cls}${unlinked ? " is-unlinked" : ""}${sleeping ? " is-sleeping" : ""}${spec.seq !== undefined ? " is-split" : ""}`;
     if (el.className !== cls) el.className = cls; // 同一値の再代入を避けて発光アニメを継続させる
     const hidden = unlinked && !snap!.config.showUnlinked;
     if (el.hidden !== hidden) el.hidden = hidden;
     if (!hidden) visibleCount += 1;
-    const hint = unlinked ? UNLINKED_HINT[project.clickTarget] : "";
+    const hint = sleeping ? SLEEPING_HINT : unlinked ? UNLINKED_HINT[project.clickTarget] : "";
     if (el.title !== hint) el.title = hint;
     const nameEl = el.querySelector(".tile-name") as HTMLElement;
     const iconEl = el.querySelector(".tile-icon") as HTMLElement;
@@ -386,6 +411,9 @@ function renderGrid(): void {
     const seqText = spec.seq !== undefined ? seqLabel(spec.seq) : "";
     if (seqEl.textContent !== seqText) seqEl.textContent = seqText;
     seqEl.hidden = seqText === "";
+    // Codex のセッションは名前の横で識別する。既存の Claude タイルには表示しない
+    const providerEl = el.querySelector(".tile-provider") as HTMLElement;
+    providerEl.hidden = session?.provider !== "codex";
     // 手動ステータスバッジ（260727_1）。未割り当ては非表示でレイアウトを崩さない
     const badgeEl = el.querySelector(".tile-badge") as HTMLElement;
     const badge = project.customStatus ?? "";
@@ -434,7 +462,7 @@ function renderGrid(): void {
     taskEl.hidden = task === "";
     const badgeRowEl = el.querySelector(".tile-badge-row") as HTMLElement;
     badgeRowEl.hidden = badge === "" && loop === "" && alert === "" && hintLabel === "" && bgText === "";
-    const icon = STATE_META[state].icon;
+    const icon = sleeping ? SLEEPING_ICON : STATE_META[state].icon;
     if (iconEl.textContent !== icon) iconEl.textContent = icon;
     // 現在の作業テキスト（260712 課題B）。取得できないセッション・待機タイルは非表示（フォールバック）
     const workEl = el.querySelector(".tile-work") as HTMLElement;
@@ -532,6 +560,13 @@ function renderSettings(): void {
   // テーマ 3 択
   document.querySelectorAll<HTMLButtonElement>("#theme-seg button").forEach((btn) => {
     btn.classList.toggle("is-active", btn.dataset.themeChoice === snap?.config.theme);
+  });
+
+  // クリック先の一括変更（261005_1）: 全プロジェクトが同じならその値、混在なら未選択。未登録なら既定値
+  const targets = new Set(snap.projects.map((p) => p.clickTarget));
+  const uniform = targets.size === 1 ? [...targets][0] : targets.size === 0 ? (snap.config.defaultClickTarget ?? "cursor") : undefined;
+  document.querySelectorAll<HTMLButtonElement>("#default-target-seg button").forEach((btn) => {
+    btn.classList.toggle("is-active", btn.dataset.targetChoice === uniform);
   });
 
   // 常に手前を規定にする（起動時の既定値。REQ-07 / design.md 8 章）
@@ -646,12 +681,12 @@ function createProjectRow(project: Project): HTMLElement {
   rename.textContent = "✎"; // ✎
   rename.addEventListener("click", () => openRenameDialog(project.id));
 
-  // クリックで開くアプリ: [Cursor｜ターミナル] 2 択（REQ-06 / 面 1d）
+  // クリックで開くアプリ: [Cursor｜Orca｜ターミナル] 3 択（REQ-06 / 面 1d。Orca は 261005_1）
   const seg = document.createElement("div");
   seg.className = "segmented small";
-  (["cursor", "terminal"] as ClickTarget[]).forEach((target) => {
+  CLICK_TARGETS.forEach((target) => {
     const btn = document.createElement("button");
-    btn.textContent = target === "cursor" ? "Cursor" : "ターミナル";
+    btn.textContent = TARGET_LABEL[target];
     btn.classList.toggle("is-active", project.clickTarget === target);
     btn.addEventListener("click", () => {
       void api.setClickTarget(project.id, target);
@@ -711,6 +746,16 @@ window.setInterval(() => {
 /* ---------------- D&D 登録（REQ-01 / 面 1c: ウィンドウ全面が受け付け領域） ---------------- */
 
 let dragDepth = 0;
+
+// タッチ／ペンの接触が終わるたびに main へ知らせる（260925_2）。Windows はタッチ画面に触れるたびに
+// ポインターを隠すため、スクロールやタイル外の接触でも迷子になる。タイル上なら続く click で対象へ
+// 移動するが、その場合もここでの再表示は害がない（位置は変えない）
+window.addEventListener("pointerup", (e) => {
+  if (e.pointerType === "touch" || e.pointerType === "pen") api.notifyTouchEnded();
+});
+window.addEventListener("pointercancel", (e) => {
+  if (e.pointerType === "touch" || e.pointerType === "pen") api.notifyTouchEnded();
+});
 
 window.addEventListener("dragenter", (e) => {
   if (isTileDrag(e.dataTransfer)) return; // タイルの並べ替え中（260906_1）は登録用オーバーレイを出さない
@@ -823,6 +868,14 @@ function wireControls(): void {
     });
   });
 
+  // クリック先の一括変更（261005_1）
+  document.querySelectorAll<HTMLButtonElement>("#default-target-seg button").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const choice = btn.dataset.targetChoice as ClickTarget | undefined;
+      if (choice !== undefined && CLICK_TARGETS.includes(choice)) void api.setAllClickTargets(choice);
+    });
+  });
+
   ($("#aot-toggle") as HTMLInputElement).addEventListener("change", (e) => {
     void api.setAlwaysOnTopDefault((e.target as HTMLInputElement).checked);
   });
@@ -863,6 +916,257 @@ function wireControls(): void {
   ($("#rename-input") as HTMLInputElement).addEventListener("keydown", (e) => {
     if (e.key === "Escape") closeRenameDialog();
   });
+
+  wireOrcaPanel();
+}
+
+/* ---------------- Orca: 画面プレビュー・返信（261005_2） ---------------- */
+
+/** マウスを置いてからプレビューを出すまで（通りがかりで CLI を呼ばない） */
+const PEEK_DELAY_MS = 600;
+/** プレビューに出す画面の行数（末尾から）。指示も出すときは短くする */
+const PEEK_LINES = 18;
+const PEEK_LINES_WITH_INSTR = 12;
+/** プレビューに出す指示の件数 */
+const PEEK_INSTRUCTIONS = 3;
+/** 返信パネルの画面の更新間隔 */
+const PANEL_REFRESH_MS = 2000;
+
+let peekTimer: number | undefined;
+/** 進行中のプレビュー要求の番号。マウスが離れた後に届いた結果は捨てる */
+let peekToken = 0;
+
+function isOrcaProject(projectId: string): boolean {
+  return snap?.projects.find((p) => p.id === projectId)?.clickTarget === "orca";
+}
+
+/** Orca 対象タイルにマウスを置くとプレビューを出す（タッチ・ペンは対象外。右クリックのパネルを使う） */
+/**
+ * タイルにマウスを置くとプレビューを出す（タッチ・ペンは対象外）。
+ * 「あなたの指示」（261005_3。全タイル）と、Orca 対象なら Orca ターミナルの末尾（261005_2）
+ */
+function wireTilePeek(el: HTMLElement, projectId: string, sessionId?: string): void {
+  el.addEventListener("pointerenter", (e) => {
+    if (e.pointerType !== "mouse" || orcaPanel !== null) return;
+    hideOrcaPeek();
+    const token = ++peekToken;
+    peekTimer = window.setTimeout(() => {
+      const orca = isOrcaProject(projectId);
+      void Promise.all([
+        api.sessionInstructions(projectId, sessionId),
+        orca ? api.orcaReadScreen(projectId, sessionId) : Promise.resolve(null),
+      ]).then(([instr, screen]) => {
+        if (token !== peekToken) return;
+        const items = instr.ok ? instr.items.slice(0, PEEK_INSTRUCTIONS) : [];
+        const lines = screen !== null && screen.ok ? (screen.lines ?? []) : [];
+        if (items.length === 0 && lines.length === 0) return;
+        // 指示があるときは画面を少し短くして、プレビューが縦に長くなりすぎないようにする
+        showOrcaPeek(el, items, lines.slice(-(items.length > 0 ? PEEK_LINES_WITH_INSTR : PEEK_LINES)));
+      });
+    }, PEEK_DELAY_MS);
+  });
+  el.addEventListener("pointerleave", () => hideOrcaPeek());
+  el.addEventListener("pointerdown", () => hideOrcaPeek());
+}
+
+/** 送った時刻の表示（今日なら HH:MM、それ以前は M/D HH:MM） */
+function fmtInstructionTime(at: number | undefined): string {
+  if (at === undefined) return "";
+  const d = new Date(at);
+  const hm = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  return d.toDateString() === new Date().toDateString() ? hm : `${d.getMonth() + 1}/${d.getDate()} ${hm}`;
+}
+
+/** 指示の一覧を描く（新しい順。先頭 = 直近の指示を太字）。0 件なら隠す */
+function renderInstructions(container: HTMLElement, items: ReadonlyArray<{ text: string; at?: number }>): void {
+  container.textContent = "";
+  container.hidden = items.length === 0;
+  if (items.length === 0) return;
+  const head = document.createElement("div");
+  head.className = "instr-head";
+  head.textContent = "あなたの指示（新しい順）";
+  container.append(head);
+  items.forEach((item, i) => {
+    const row = document.createElement("div");
+    row.className = i === 0 ? "instr-item is-latest" : "instr-item";
+    const time = document.createElement("span");
+    time.className = "instr-time";
+    time.textContent = fmtInstructionTime(item.at);
+    const text = document.createElement("div");
+    text.className = "instr-text";
+    text.textContent = item.text;
+    text.title = item.text; // 省略された長い指示も hover で全文が読める
+    row.append(time, text);
+    container.append(row);
+  });
+}
+
+function hideOrcaPeek(): void {
+  peekToken += 1;
+  if (peekTimer !== undefined) window.clearTimeout(peekTimer);
+  peekTimer = undefined;
+  $("#orca-peek").hidden = true;
+}
+
+/** タイルの下（入らなければ上）に、画面の外へはみ出さない位置で出す */
+function showOrcaPeek(anchor: HTMLElement, items: ReadonlyArray<{ text: string; at?: number }>, lines: string[]): void {
+  const box = $("#orca-peek");
+  renderInstructions($("#peek-instr"), items);
+  const pre = $("#orca-peek-text");
+  pre.textContent = lines.join("\n");
+  pre.hidden = lines.length === 0;
+  box.hidden = false;
+  const r = anchor.getBoundingClientRect();
+  const w = box.offsetWidth;
+  const h = box.offsetHeight;
+  const left = Math.max(8, Math.min(r.left, window.innerWidth - w - 8));
+  let top = r.bottom + 6;
+  if (top + h > window.innerHeight - 8) top = Math.max(8, r.top - h - 6);
+  box.style.left = `${left}px`;
+  box.style.top = `${top}px`;
+}
+
+/** 開いている返信パネル。状態はパネルごとに持つ（閉じた古いパネルの送信完了が新しいパネルに影響しない） */
+interface OrcaPanelState {
+  projectId: string;
+  /** 開いた時点で固定したセッション。無ければ送信しない（表示のみ） */
+  sessionId?: string;
+  /** 送信中（応答待ち）。この間は画面の更新が入力欄を再び有効にしない（二重送信・Esc 二連打を防ぐ） */
+  sending: boolean;
+  /** 直近に「送信できる」と確認できたか。更新が一時的に失敗しても入力途中の欄を無効にしない */
+  sendable: boolean;
+  /** 前回描いた指示の一覧（同じなら描き直さない） */
+  instrKey?: string;
+}
+
+let orcaPanel: OrcaPanelState | null = null;
+let orcaPanelTimer: number | undefined;
+
+/** 右クリック →「Orca: 画面を見て返信…」 */
+function openOrcaPanel(projectId: string, sessionId?: string): void {
+  const project = snap?.projects.find((p) => p.id === projectId);
+  if (project === undefined) return;
+  hideOrcaPeek();
+  // 開いた時点のセッションに固定する（代表セッションが後から入れ替わっても、送信先が変わらないように）
+  const pinned = sessionId ?? snap?.sessions[projectId]?.sessionId;
+  orcaPanel = pinned !== undefined
+    ? { projectId, sessionId: pinned, sending: false, sendable: false }
+    : { projectId, sending: false, sendable: false };
+  $("#orca-title").textContent = `Orca — ${project.name}`;
+  $("#orca-screen").textContent = "読み込み中…";
+  $("#orca-note").textContent = "";
+  renderInstructions($("#orca-instr"), []);
+  const input = $("#orca-input") as HTMLInputElement;
+  input.value = "";
+  setOrcaSendEnabled(false);
+  $("#orca-dialog").hidden = false;
+  input.focus();
+  if (orcaPanelTimer !== undefined) window.clearTimeout(orcaPanelTimer);
+  orcaPanelTimer = undefined;
+  void refreshOrcaPanelLoop(orcaPanel);
+}
+
+/** 前回の読み取りが終わってから次を予約する（Orca が遅いときに CLI を積み上げない） */
+async function refreshOrcaPanelLoop(target: typeof orcaPanel): Promise<void> {
+  if (target === null || orcaPanel !== target) return;
+  await refreshOrcaPanel();
+  if (orcaPanel !== target) return;
+  orcaPanelTimer = window.setTimeout(() => void refreshOrcaPanelLoop(target), PANEL_REFRESH_MS);
+}
+
+function closeOrcaPanel(): void {
+  orcaPanel = null;
+  if (orcaPanelTimer !== undefined) window.clearTimeout(orcaPanelTimer);
+  orcaPanelTimer = undefined;
+  $("#orca-dialog").hidden = true;
+}
+
+function setOrcaSendEnabled(enabled: boolean): void {
+  ($("#orca-input") as HTMLInputElement).disabled = !enabled;
+  ($("#orca-send") as HTMLButtonElement).disabled = !enabled;
+  ($("#orca-esc") as HTMLButtonElement).disabled = !enabled;
+}
+
+async function refreshOrcaPanel(): Promise<void> {
+  const target = orcaPanel;
+  if (target === null) return;
+  const [r, instr] = await Promise.all([
+    api.orcaReadScreen(target.projectId, target.sessionId),
+    api.sessionInstructions(target.projectId, target.sessionId),
+  ]);
+  if (orcaPanel !== target) return; // 閉じた・別のパネルを開いた後の結果は捨てる
+  // 指示の欄は内容が変わったときだけ描き直す（読んでいる途中のスクロール位置を戻さない）
+  const instrKey = JSON.stringify(instr.items);
+  if (instr.ok && instrKey !== target.instrKey) {
+    target.instrKey = instrKey;
+    renderInstructions($("#orca-instr"), instr.items);
+  }
+  const screen = $("#orca-screen");
+  // 下端を見ているときだけ追従する（上へスクロールして読んでいる途中は動かさない）
+  const atBottom = screen.scrollHeight - screen.scrollTop - screen.clientHeight < 24;
+  if (!r.ok) {
+    // 一時的な失敗では画面と入力欄の状態を保つ（入力途中の欄を無効にしない）
+    if (!target.sending) $("#orca-note").textContent = r.message ?? "画面を読めませんでした";
+    return;
+  }
+  screen.textContent = (r.lines ?? []).join("\n");
+  if (atBottom) screen.scrollTop = screen.scrollHeight;
+  if (target.sending) return; // 送信の結果待ち。入力欄の有効化と案内文は送信処理に任せる
+  // セッションを固定できなかったパネルは表示のみ（main 側も送信を拒否する）
+  target.sendable = r.exact === true && target.sessionId !== undefined;
+  const input = $("#orca-input") as HTMLInputElement;
+  const wasDisabled = input.disabled;
+  setOrcaSendEnabled(target.sendable);
+  if (target.sendable && wasDisabled) input.focus();
+  $("#orca-note").textContent = target.sendable
+    ? ""
+    : "このセッションのエージェントが動いている Orca ターミナルを確認できないため、ここからは送信できません。";
+}
+
+async function sendOrcaInput(input: { kind: "text"; text: string } | { kind: "escape" }): Promise<void> {
+  const target = orcaPanel;
+  if (target === null || target.sending || !target.sendable) return;
+  target.sending = true;
+  setOrcaSendEnabled(false);
+  $("#orca-note").textContent = input.kind === "escape" ? "中断（Esc）を送っています…" : "送信しています…";
+  try {
+    const r = await api.orcaSend(target.projectId, target.sessionId, input);
+    if (orcaPanel !== target) return;
+    if (!r.ok) {
+      $("#orca-note").textContent = r.message ?? "送信できませんでした";
+    } else {
+      $("#orca-note").textContent = input.kind === "escape" ? "中断（Esc）を送りました" : "送信しました";
+      if (input.kind === "text") ($("#orca-input") as HTMLInputElement).value = "";
+    }
+  } finally {
+    target.sending = false;
+    if (orcaPanel === target) {
+      setOrcaSendEnabled(target.sendable);
+      if (target.sendable) ($("#orca-input") as HTMLInputElement).focus();
+    }
+  }
+}
+
+function wireOrcaPanel(): void {
+  $("#orca-form").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const text = ($("#orca-input") as HTMLInputElement).value;
+    if (text.trim() !== "") void sendOrcaInput({ kind: "text", text });
+  });
+  $("#orca-esc").addEventListener("click", () => void sendOrcaInput({ kind: "escape" }));
+  $("#orca-open").addEventListener("click", () => {
+    const target = orcaPanel;
+    closeOrcaPanel();
+    if (target !== null) void api.focusProject(target.projectId, target.sessionId !== undefined ? { sessionId: target.sessionId } : undefined);
+  });
+  $("#orca-close").addEventListener("click", () => closeOrcaPanel());
+  $("#orca-dialog").addEventListener("click", (e) => {
+    if (e.target === e.currentTarget) closeOrcaPanel();
+  });
+  $("#orca-dialog").addEventListener("keydown", (e) => {
+    // Esc はパネルを閉じるだけ（エージェントへの中断は「中断（Esc）」ボタンで明示的に送る）
+    if (e.key === "Escape") closeOrcaPanel();
+  });
 }
 
 /* ---------------- 起動 ---------------- */
@@ -876,6 +1180,8 @@ api.onSnapshot((s) => {
 
 // タイル右クリック →「表示名を変更…」（260903_2）。メニュー本体は main のネイティブ Menu、入力 UI はこちら
 api.onRenameRequest((id) => openRenameDialog(id));
+// タイル右クリック →「Orca: 画面を見て返信…」（261005_2）
+api.onOrcaPanelRequest((id, sessionId) => openOrcaPanel(id, sessionId ?? undefined));
 
 void (async () => {
   wireControls();

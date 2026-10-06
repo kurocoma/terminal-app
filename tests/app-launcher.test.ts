@@ -4,8 +4,23 @@
  * 「どのインストールを・どの引数で起動するか」を確認する。
  */
 import * as path from "path";
-import { describe, expect, it } from "vitest";
-import { resolveLaunchCommand, type ResolveDeps } from "../src/main/app-launcher";
+import { spawn, spawnSync } from "child_process";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { launchProjectApp, resolveLaunchCommand, type ResolveDeps } from "../src/main/app-launcher";
+
+vi.mock("child_process", async (importOriginal) => ({
+  ...await importOriginal<typeof import("child_process")>(),
+  spawn: vi.fn(() => ({ unref: vi.fn() })),
+}));
+vi.mock("fs", async (importOriginal) => ({
+  ...await importOriginal<typeof import("fs")>(),
+  lstatSync: vi.fn(),
+}));
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+  vi.clearAllMocks();
+});
 
 const PROJECT = "C:\\Users\\me\\dev\\my-app";
 
@@ -99,5 +114,68 @@ describe("resolveLaunchCommand: terminal", () => {
   it("wt.exe が見つからなければ null", () => {
     const d = deps({ PATH: "C:\\Windows" }, []);
     expect(resolveLaunchCommand("terminal", PROJECT, d)).toBeNull();
+  });
+});
+
+describe("launchProjectApp: child environment", () => {
+  const codexKeys = ["CODEX_CI", "CODEX_SESSION_ID", "CODEX_THREAD_ID"];
+
+  function launchedEnv() {
+    const options = vi.mocked(spawn).mock.calls[0]?.[2];
+    expect(options).toBeDefined();
+    return options!.env ?? process.env;
+  }
+
+  it.each(["cursor", "terminal"] as const)("%s の子プロセスへ Codex の端末設定と識別情報を渡さない", (target) => {
+    vi.stubEnv("NO_COLOR", "1");
+    vi.stubEnv("TERM", "dumb");
+    vi.stubEnv("FORCE_COLOR", "0");
+    for (const key of codexKeys) vi.stubEnv(key, "launcher-test-fixture");
+    vi.stubEnv("LAUNCHER_TEST_CUSTOM", "preserved");
+
+    expect(launchProjectApp(target, PROJECT)).toEqual({ ok: true });
+    const env = launchedEnv();
+    for (const key of [...codexKeys, "NO_COLOR", "TERM", "FORCE_COLOR"]) {
+      expect(env[key], key).toBeUndefined();
+    }
+    expect(env.LAUNCHER_TEST_CUSTOM).toBe("preserved");
+    expect(env.PATH ?? env.Path).toBe(process.env.PATH ?? process.env.Path);
+    expect(process.env.NO_COLOR).toBe("1");
+    expect(process.env.TERM).toBe("dumb");
+    expect(process.env.CODEX_CI).toBe("launcher-test-fixture");
+
+    // spawn の設定だけでなく、実際の子プロセスにも汚染が届かないことを確認する。
+    const probe = spawnSync(process.execPath, ["-e", `
+      const keys = ["NO_COLOR", "TERM", "FORCE_COLOR", "CODEX_CI", "CODEX_SESSION_ID", "CODEX_THREAD_ID"];
+      process.stdout.write(JSON.stringify({
+        absent: keys.every(key => process.env[key] === undefined),
+        custom: process.env.LAUNCHER_TEST_CUSTOM
+      }));
+    `], { env, encoding: "utf8", windowsHide: true });
+    expect(probe.status).toBe(0);
+    expect(JSON.parse(probe.stdout)).toEqual({ absent: true, custom: "preserved" });
+  });
+
+  it("Codex 以外から起動された場合はユーザーの色・端末設定を維持する", () => {
+    for (const key of codexKeys) vi.stubEnv(key, undefined);
+    vi.stubEnv("NO_COLOR", "1");
+    vi.stubEnv("TERM", "dumb");
+    vi.stubEnv("FORCE_COLOR", "0");
+
+    expect(launchProjectApp("cursor", PROJECT).ok).toBe(true);
+    expect(launchedEnv()).toMatchObject({ NO_COLOR: "1", TERM: "dumb", FORCE_COLOR: "0" });
+  });
+
+  it.each(codexKeys)("%s だけでも Codex 由来を検出し、通常の端末能力と CODEX_HOME は維持する", (key) => {
+    for (const codexKey of codexKeys) vi.stubEnv(codexKey, undefined);
+    vi.stubEnv(key, "launcher-test-fixture");
+    vi.stubEnv("TERM", "xterm-256color");
+    vi.stubEnv("NO_COLOR", "user-choice");
+    vi.stubEnv("FORCE_COLOR", "3");
+    vi.stubEnv("CODEX_HOME", "C:/test-codex-home");
+
+    expect(launchProjectApp("cursor", PROJECT).ok).toBe(true);
+    expect(launchedEnv()).toMatchObject({ TERM: "xterm-256color", NO_COLOR: "user-choice", FORCE_COLOR: "3", CODEX_HOME: "C:/test-codex-home" });
+    for (const codexKey of codexKeys) expect(launchedEnv()[codexKey]).toBeUndefined();
   });
 });

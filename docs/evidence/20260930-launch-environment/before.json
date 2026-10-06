@@ -1,0 +1,43 @@
+{
+  "mode": "before",
+  "passed": true,
+  "productionEnvProvided": false,
+  "terminal": {
+    "NO_COLOR": {
+      "present": true,
+      "disablesColor": true
+    },
+    "TERM": {
+      "present": true,
+      "dumb": true
+    },
+    "CODEX_CI": {
+      "present": true
+    },
+    "CODEX_SESSION_ID": {
+      "present": true
+    },
+    "CODEX_THREAD_ID": {
+      "present": true
+    }
+  },
+  "extensionHost": {
+    "NO_COLOR": {
+      "present": true,
+      "disablesColor": true
+    },
+    "TERM": {
+      "present": true,
+      "dumb": true
+    },
+    "CODEX_CI": {
+      "present": true
+    },
+    "CODEX_SESSION_ID": {
+      "present": true
+    },
+    "CODEX_THREAD_ID": {
+      "present": true
+    }
+  }
+}

@@ -47,8 +47,17 @@ export function fmtStatusCounts(counts: StatusCounts): string {
  * 見つかったか」（Snapshot.windowPresence）。undefined = 判定不能（koffi 未ロード・初回判定前）。
  * 規則: ウィンドウが無く、かつ実行中・確認待ちでもないタイルだけを未接続にする —
  * タイトル一致の偽陰性（タブ切替でタイトルが変わる等）で作業中のタイルを灰色化・非表示にしないため。
+ * Codex は writer lock で終了を確認した履歴（terminalClosed）だけを同じ規則に乗せる（260929_1）。
  */
-export function isUnlinked(present: boolean | undefined, state: SessionState | undefined): boolean {
+export function isUnlinked(
+  present: boolean | undefined,
+  state: SessionState | undefined,
+  provider?: SessionView["provider"],
+  terminalClosed?: boolean,
+): boolean {
+  // 開いている Codex（Cursor 外の CLI・アプリを含む）は Cursor のウィンドウ有無では隠さない。
+  // 終了を確認した履歴まで除外すると、閉じたプロジェクトが最大 24 時間「完了」のまま残る
+  if (provider === "codex" && terminalClosed !== true) return false;
   if (present !== false) return false;
   return state !== "running" && state !== "confirm";
 }

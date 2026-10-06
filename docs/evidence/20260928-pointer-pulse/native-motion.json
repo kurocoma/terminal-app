@@ -1,0 +1,49 @@
+{
+  "pass": true,
+  "before": {
+    "x": 4936,
+    "y": 1101
+  },
+  "during": {
+    "x": 4938,
+    "y": 1101
+  },
+  "after": {
+    "x": 4936,
+    "y": 1101
+  },
+  "records": [
+    {
+      "ms": 3,
+      "count": 1,
+      "size": 40,
+      "flags": 57345,
+      "inserted": 1
+    },
+    {
+      "ms": 82,
+      "count": 1,
+      "size": 40,
+      "flags": 57345,
+      "inserted": 1
+    }
+  ],
+  "events": [
+    {
+      "kind": "final",
+      "delayMs": 300
+    }
+  ],
+  "state": {
+    "pos": {
+      "x": 4936,
+      "y": 1101
+    },
+    "flags": 1,
+    "hasCursorShape": true,
+    "foregroundPid": 93880,
+    "pointerWindowPid": 93880
+  },
+  "visibilityConditionSimulated": true,
+  "touchRecoveryVerified": false
+}
