@@ -1,4 +1,4 @@
-/* global fetch, AbortSignal, setTimeout, clearTimeout */
+/* global fetch, AbortSignal, clearTimeout */
 /**
  * 自己診断（260927_1）: 「直近の動作が問題なく行われているか」を 1 コマンドで確かめる。
  *

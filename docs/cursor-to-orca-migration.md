@@ -126,3 +126,17 @@ npx vitest run tests/orca.test.ts tests/orca-interact.test.ts tests/codex-monito
 ```
 
 当時の記録には typecheck / lint / build / dry-run、使い捨て端末での引用符・日本語・Esc 等の確認がある。これは今回の移行先での実行結果ではない。クロコマースの PC での認証・設定切替・タブ選択・返信・Sleep は、移行実行時に上記の完了条件で確認する。
+
+## 9. クロコマース側の取り込み記録（2026-10-07）
+
+| 項目 | 記録内容 |
+|---|---|
+| 移行先 | kurocoma/terminal-app の `feat/orca-support`（基点は main `9302b04`） |
+| 取得元 | Travel-Connect の `6e23614`（Orca 対応）と `1b10b6f`（この移行記録）を merge。競合は README の導線 1 行だけで、両方の行を残した |
+| 独自変更 | 自己診断（260927_1）と引き継ぎ資料は保持。`scripts/diagnose.mjs` の lint エラー（`setTimeout` の二重宣言）だけ修正 |
+| 設定 | 保存先は `%APPDATA%\terminal-app\`。登録 24 件のクリック先と新規登録の既定を Orca に変更。変更前の控えは同じ場所の `backup-20261007-pre-orca\` |
+| パス対応 | 登録 24 件のうち 10 件は Orca に登録済みのフォルダと一致。残り 14 件は Orca に未登録（必要になった時点でタイルの「立ち上げる」から登録する） |
+| チェック | test 765 件成功 / typecheck 成功 / lint 成功 / build 成功 / 自己診断は「状態の往復」だけ NG（再起動前の旧コードで起きた分。再起動後は 0 件） |
+| 実操作で確認 | 再起動後も一括設定が Orca のまま。タイルのクリックで Orca の前面化とタブ切替が成功。ホバーで画面と最近の指示を表示。端末 0 のフォルダは「☾ スリープ中（Orca）」表示 |
+| 未確認 | 返信・中断（Esc）、差分表示、「立ち上げる」「起こす」、Codex の承認待ち表示。使い捨てセッションを用意していないため、この PC では未実施 |
+| 戻し方 | 設定の「クリックで開くアプリ（一括）」を Cursor にする。控えの JSON へ戻す場合は terminal-app を終了してから置き換える |
