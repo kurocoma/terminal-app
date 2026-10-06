@@ -289,7 +289,7 @@ export function countTiles(views: readonly SessionView[]): StatusCounts {
   return c;
 }
 
-/** 内部記録 → 配信用ビュー（dead は内部専用。firstSeenAt は分割タイルの並び順用に載せる） */
+/** 内部記録 → 配信用ビュー（終了確認は terminalClosed、firstSeenAt は分割タイルの並び順用に載せる） */
 function toView(rec: SessionRec): SessionView {
   const view: SessionView = {
     sessionId: rec.sessionId,
@@ -298,6 +298,7 @@ function toView(rec: SessionRec): SessionView {
     lastEventAt: rec.lastEventAt,
     firstSeenAt: rec.firstSeenAt,
   };
+  if (rec.dead === true) view.terminalClosed = true;
   if (rec.runningSince !== undefined) view.runningSince = rec.runningSince;
   if (rec.lastMessage !== undefined) view.lastMessage = rec.lastMessage;
   if (rec.workText !== undefined) view.workText = rec.workText;
@@ -871,7 +872,10 @@ export class StateStore extends EventEmitter {
 
   /** デモ用シード（--demo 実行時のみ使用。hooks 追記・永続化は一切行わない） */
   seedSession(rec: SessionView): void {
-    this.sessions.set(rec.sessionId, { ...rec, firstSeenAt: rec.firstSeenAt ?? rec.runningSince ?? rec.lastEventAt });
+    const { terminalClosed, ...view } = rec;
+    const seeded: SessionRec = { ...view, firstSeenAt: rec.firstSeenAt ?? rec.runningSince ?? rec.lastEventAt };
+    if (terminalClosed === true) seeded.dead = true;
+    this.sessions.set(rec.sessionId, seeded);
     this.emit("changed");
   }
 

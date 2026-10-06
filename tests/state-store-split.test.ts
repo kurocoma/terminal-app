@@ -73,6 +73,36 @@ describe("splitSessions（260904_1 #3）", () => {
     expect(store.displaySessions(projects)["p1"].sessionId).toBe("s-dead");
   });
 
+  it("終了したターミナルの履歴だけに終了印を付け、生存確認やイベント復帰で外す", () => {
+    const { store } = storeAt();
+    store.applyEvent(evt("Stop", "s1"), projects);
+    expect(store.displaySessions(projects)["p1"]).not.toHaveProperty("terminalClosed");
+
+    store.setDead("s1", true);
+    expect(store.displaySessions(projects)["p1"].terminalClosed).toBe(true);
+    expect(store.exportSessions()).toEqual([]);
+
+    store.setDead("s1", false);
+    expect(store.displaySessions(projects)["p1"]).not.toHaveProperty("terminalClosed");
+    store.setDead("s1", true);
+    store.applyEvent(evt("UserPromptSubmit", "s1"), projects);
+    expect(store.displaySessions(projects)["p1"]).not.toHaveProperty("terminalClosed");
+    expect(store.exportSessions()[0]).not.toHaveProperty("terminalClosed");
+  });
+
+  it("終了済みビューをシードしても生存扱いや保存対象に戻さず、復帰後は終了印を残さない", () => {
+    const { store } = storeAt();
+    store.seedSession({ sessionId: "s1", projectId: "p1", state: "done", lastEventAt: 100, terminalClosed: true });
+    expect(store.displaySessions(projects)["p1"].terminalClosed).toBe(true);
+    expect(store.exportSessions()).toEqual([]);
+
+    store.applyEvent(evt("UserPromptSubmit", "s1"), projects);
+    expect(store.displaySessions(projects)["p1"]).not.toHaveProperty("terminalClosed");
+    const restored = new StateStore();
+    restored.importSessions(store.exportSessions());
+    expect(restored.displaySessions(projects)["p1"]).not.toHaveProperty("terminalClosed");
+  });
+
   it("切断（disconnected）は分割の対象外。復帰イベントが届けば dead が解けて再び対象になる", () => {
     const { store, tick } = storeAt();
     store.applyEvent(evt("UserPromptSubmit", "s1", "C:/dev/dev", { transcript_path: "C:/t/s1.jsonl" }), projects);

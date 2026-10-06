@@ -1,0 +1,732 @@
+{
+  "at": "2026-09-28T03:33:27.314Z",
+  "passed": true,
+  "checks": [
+    {
+      "label": "Codex DB の実行中を表示",
+      "passed": true,
+      "actual": "codex",
+      "expected": "codex"
+    },
+    {
+      "label": "Codex の最新ユーザー依頼を表示",
+      "passed": true,
+      "actual": "Codex fixture first task",
+      "expected": "Codex fixture first task"
+    },
+    {
+      "label": "Codex ラベル付きタイルを表示",
+      "passed": true,
+      "actual": false,
+      "expected": false
+    },
+    {
+      "label": "未接続を隠す設定でも Codex 完了を表示",
+      "passed": true,
+      "actual": [
+        false,
+        false
+      ],
+      "expected": [
+        false,
+        false
+      ]
+    },
+    {
+      "label": "Cursor が無くても Codex 完了を灰色化しない",
+      "passed": true,
+      "actual": false,
+      "expected": false
+    },
+    {
+      "label": "応答完了後もロックがある Codex は開いている入力待ちとして残る",
+      "passed": true,
+      "actual": [
+        "done",
+        false
+      ],
+      "expected": [
+        "done",
+        false
+      ]
+    },
+    {
+      "label": "新しいターンで完了から実行中に戻る",
+      "passed": true,
+      "actual": "running",
+      "expected": "running"
+    },
+    {
+      "label": "hook Claude の受信",
+      "passed": true,
+      "actual": 204,
+      "expected": 204
+    },
+    {
+      "label": "同じ cwd の Claude と Codex を分割表示",
+      "passed": true,
+      "actual": [
+        "claude",
+        "codex"
+      ],
+      "expected": [
+        "claude",
+        "codex"
+      ]
+    },
+    {
+      "label": "Claude のラベル表示は変えない",
+      "passed": true,
+      "actual": "",
+      "expected": ""
+    },
+    {
+      "label": "分割タイルをセッション数に反映",
+      "passed": true,
+      "actual": 2,
+      "expected": 2
+    },
+    {
+      "label": "hook ghost の受信",
+      "passed": true,
+      "actual": 204,
+      "expected": 204
+    },
+    {
+      "label": "Claude 掃引後も Codex の実行中が残る",
+      "passed": true,
+      "actual": "running",
+      "expected": "running"
+    },
+    {
+      "label": "Codex を Claude 登録簿の終了判定にかけない",
+      "passed": true,
+      "actual": false,
+      "expected": false
+    },
+    {
+      "label": "Codex の質問を返答待ちで表示",
+      "passed": true,
+      "actual": "question",
+      "expected": "question"
+    },
+    {
+      "label": "返答待ちの Codex を先頭に表示",
+      "passed": true,
+      "actual": "Codex",
+      "expected": "Codex"
+    },
+    {
+      "label": "再起動後も同じ Codex セッションを表示",
+      "passed": true,
+      "actual": "codex:00000000-c0de-4000-8000-000000000001",
+      "expected": "codex:00000000-c0de-4000-8000-000000000001"
+    },
+    {
+      "label": "再起動後も質問待ちを復元",
+      "passed": true,
+      "actual": "question",
+      "expected": "question"
+    },
+    {
+      "label": "Codex のターン完了だけでは分割タイルを減らさない",
+      "passed": true,
+      "actual": 2,
+      "expected": 2
+    },
+    {
+      "label": "開いている Claude 1 本と Codex 2 本をそれぞれ表示",
+      "passed": true,
+      "actual": [
+        "00000000-c1a0-4000-8000-000000000001",
+        "codex:00000000-c0de-4000-8000-000000000001",
+        "codex:00000000-c0de-4000-8000-000000000002"
+      ],
+      "expected": [
+        "00000000-c1a0-4000-8000-000000000001",
+        "codex:00000000-c0de-4000-8000-000000000001",
+        "codex:00000000-c0de-4000-8000-000000000002"
+      ]
+    },
+    {
+      "label": "Codex 2 本のうち入力待ちも開いたタイルとして数える",
+      "passed": true,
+      "actual": [
+        "done",
+        false,
+        3
+      ],
+      "expected": [
+        "done",
+        false,
+        3
+      ]
+    },
+    {
+      "label": "DB が実行中のままでも閉じた Codex を分割から外す",
+      "passed": true,
+      "actual": "inProgress",
+      "expected": "inProgress"
+    },
+    {
+      "label": "Codex 1 本を閉じると 3 枚から 2 枚へ減る",
+      "passed": true,
+      "actual": [
+        2,
+        2
+      ],
+      "expected": [
+        2,
+        2
+      ]
+    },
+    {
+      "label": "終了済み Claude 履歴を開いている Codex と分割しない",
+      "passed": true,
+      "actual": [
+        1,
+        false
+      ],
+      "expected": [
+        1,
+        false
+      ]
+    },
+    {
+      "label": "1 本へ戻ると分割の番号と装飾が外れる",
+      "passed": true,
+      "actual": false,
+      "expected": false
+    },
+    {
+      "label": "最後の Codex を閉じても分割せず完了履歴を 1 枚残す",
+      "passed": true,
+      "actual": [
+        1,
+        "done",
+        true
+      ],
+      "expected": [
+        1,
+        "done",
+        true
+      ]
+    },
+    {
+      "label": "DB に新しいターンが無くてもロック再取得で終了印を外す",
+      "passed": true,
+      "actual": [
+        "codex:00000000-c0de-4000-8000-000000000001",
+        "done",
+        false
+      ],
+      "expected": [
+        "codex:00000000-c0de-4000-8000-000000000001",
+        "done",
+        false
+      ]
+    }
+  ],
+  "checkpoints": [
+    {
+      "name": "running",
+      "presence": false,
+      "showUnlinked": false,
+      "splitCount": 0,
+      "sessions": [
+        {
+          "sessionId": "codex:00000000-c0de-4000-8000-000000000001",
+          "provider": "codex",
+          "state": "running",
+          "workText": "Codex fixture first task",
+          "runningSince": 1790566392000,
+          "terminalClosed": false
+        }
+      ],
+      "counts": {
+        "running": 1,
+        "done": 0,
+        "confirm": 0,
+        "error": 0,
+        "total": 1
+      },
+      "tiles": [
+        {
+          "classes": "tile state-running",
+          "hidden": false,
+          "provider": "Codex",
+          "status": "0:00:01"
+        }
+      ]
+    },
+    {
+      "name": "completed",
+      "presence": false,
+      "showUnlinked": false,
+      "splitCount": 0,
+      "sessions": [
+        {
+          "sessionId": "codex:00000000-c0de-4000-8000-000000000001",
+          "provider": "codex",
+          "state": "done",
+          "workText": "Codex fixture first task",
+          "terminalClosed": false
+        }
+      ],
+      "counts": {
+        "running": 0,
+        "done": 1,
+        "confirm": 0,
+        "error": 0,
+        "total": 1
+      },
+      "tiles": [
+        {
+          "classes": "tile state-done",
+          "hidden": false,
+          "provider": "Codex",
+          "status": "完了・たった今"
+        }
+      ]
+    },
+    {
+      "name": "next-turn",
+      "presence": false,
+      "showUnlinked": false,
+      "splitCount": 0,
+      "sessions": [
+        {
+          "sessionId": "codex:00000000-c0de-4000-8000-000000000001",
+          "provider": "codex",
+          "state": "running",
+          "workText": "Codex fixture next task",
+          "runningSince": 1790566394000,
+          "terminalClosed": false
+        }
+      ],
+      "counts": {
+        "running": 1,
+        "done": 0,
+        "confirm": 0,
+        "error": 0,
+        "total": 1
+      },
+      "tiles": [
+        {
+          "classes": "tile state-running",
+          "hidden": false,
+          "provider": "Codex",
+          "status": "0:00:00"
+        }
+      ]
+    },
+    {
+      "name": "mixed-split",
+      "presence": false,
+      "showUnlinked": false,
+      "splitCount": 2,
+      "sessions": [
+        {
+          "sessionId": "codex:00000000-c0de-4000-8000-000000000001",
+          "provider": "codex",
+          "state": "running",
+          "workText": "Codex fixture next task",
+          "runningSince": 1790566394000,
+          "terminalClosed": false
+        },
+        {
+          "sessionId": "00000000-c1a0-4000-8000-000000000001",
+          "provider": "claude",
+          "state": "running",
+          "workText": "Claude fixture task",
+          "runningSince": 1790566395060,
+          "terminalClosed": false
+        }
+      ],
+      "counts": {
+        "running": 2,
+        "done": 0,
+        "confirm": 0,
+        "error": 0,
+        "total": 2
+      },
+      "tiles": [
+        {
+          "sessionId": "codex:00000000-c0de-4000-8000-000000000001",
+          "classes": "tile state-running is-split",
+          "hidden": false,
+          "provider": "Codex",
+          "status": "0:00:01"
+        },
+        {
+          "sessionId": "00000000-c1a0-4000-8000-000000000001",
+          "classes": "tile state-running is-split",
+          "hidden": false,
+          "provider": "",
+          "status": "0:00:00"
+        }
+      ]
+    },
+    {
+      "name": "after-two-sweeps",
+      "presence": false,
+      "showUnlinked": false,
+      "splitCount": 2,
+      "sessions": [
+        {
+          "sessionId": "codex:00000000-c0de-4000-8000-000000000001",
+          "provider": "codex",
+          "state": "running",
+          "workText": "Codex fixture next task",
+          "runningSince": 1790566394000,
+          "terminalClosed": false
+        },
+        {
+          "sessionId": "00000000-c1a0-4000-8000-000000000001",
+          "provider": "claude",
+          "state": "running",
+          "workText": "Claude fixture task",
+          "runningSince": 1790566395060,
+          "terminalClosed": false
+        }
+      ],
+      "counts": {
+        "running": 2,
+        "done": 0,
+        "confirm": 0,
+        "error": 0,
+        "total": 2
+      },
+      "tiles": [
+        {
+          "sessionId": "codex:00000000-c0de-4000-8000-000000000001",
+          "classes": "tile state-running is-split",
+          "hidden": false,
+          "provider": "Codex",
+          "status": "0:00:03"
+        },
+        {
+          "sessionId": "00000000-c1a0-4000-8000-000000000001",
+          "classes": "tile state-running is-split",
+          "hidden": false,
+          "provider": "",
+          "status": "0:00:02"
+        }
+      ]
+    },
+    {
+      "name": "question",
+      "presence": false,
+      "showUnlinked": false,
+      "splitCount": 2,
+      "sessions": [
+        {
+          "sessionId": "codex:00000000-c0de-4000-8000-000000000001",
+          "provider": "codex",
+          "state": "confirm",
+          "workText": "Codex fixture next task",
+          "confirmKind": "question",
+          "terminalClosed": false
+        },
+        {
+          "sessionId": "00000000-c1a0-4000-8000-000000000001",
+          "provider": "claude",
+          "state": "running",
+          "workText": "Claude fixture task",
+          "runningSince": 1790566395060,
+          "terminalClosed": false
+        }
+      ],
+      "counts": {
+        "running": 1,
+        "done": 0,
+        "confirm": 1,
+        "error": 0,
+        "total": 2
+      },
+      "tiles": [
+        {
+          "sessionId": "codex:00000000-c0de-4000-8000-000000000001",
+          "classes": "tile state-confirm is-split",
+          "hidden": false,
+          "provider": "Codex",
+          "status": "返答待ち・たった今"
+        },
+        {
+          "sessionId": "00000000-c1a0-4000-8000-000000000001",
+          "classes": "tile state-running is-split",
+          "hidden": false,
+          "provider": "",
+          "status": "0:00:02"
+        }
+      ]
+    },
+    {
+      "name": "restarted",
+      "presence": false,
+      "showUnlinked": false,
+      "splitCount": 2,
+      "sessions": [
+        {
+          "sessionId": "codex:00000000-c0de-4000-8000-000000000001",
+          "provider": "codex",
+          "state": "confirm",
+          "workText": "Codex fixture next task",
+          "confirmKind": "question",
+          "terminalClosed": false
+        },
+        {
+          "sessionId": "00000000-c1a0-4000-8000-000000000001",
+          "provider": "claude",
+          "state": "running",
+          "workText": "Claude fixture task",
+          "runningSince": 1790566395060,
+          "terminalClosed": false
+        }
+      ],
+      "counts": {
+        "running": 1,
+        "done": 0,
+        "confirm": 1,
+        "error": 0,
+        "total": 2
+      },
+      "tiles": [
+        {
+          "sessionId": "codex:00000000-c0de-4000-8000-000000000001",
+          "classes": "tile state-confirm is-split",
+          "hidden": false,
+          "provider": "Codex",
+          "status": "返答待ち・たった今"
+        },
+        {
+          "sessionId": "00000000-c1a0-4000-8000-000000000001",
+          "classes": "tile state-running is-split",
+          "hidden": false,
+          "provider": "",
+          "status": "0:00:04"
+        }
+      ]
+    },
+    {
+      "name": "three-open-terminals",
+      "presence": false,
+      "showUnlinked": false,
+      "splitCount": 3,
+      "sessions": [
+        {
+          "sessionId": "codex:00000000-c0de-4000-8000-000000000001",
+          "provider": "codex",
+          "state": "done",
+          "workText": "Codex fixture answer",
+          "terminalClosed": false
+        },
+        {
+          "sessionId": "00000000-c1a0-4000-8000-000000000001",
+          "provider": "claude",
+          "state": "running",
+          "workText": "Claude fixture task",
+          "runningSince": 1790566395060,
+          "terminalClosed": false
+        },
+        {
+          "sessionId": "codex:00000000-c0de-4000-8000-000000000002",
+          "provider": "codex",
+          "state": "running",
+          "workText": "Second Codex fixture task",
+          "runningSince": 1790566400000,
+          "terminalClosed": false
+        }
+      ],
+      "counts": {
+        "running": 2,
+        "done": 1,
+        "confirm": 0,
+        "error": 0,
+        "total": 3
+      },
+      "tiles": [
+        {
+          "sessionId": "codex:00000000-c0de-4000-8000-000000000001",
+          "classes": "tile state-done is-split",
+          "hidden": false,
+          "provider": "Codex",
+          "status": "完了・たった今"
+        },
+        {
+          "sessionId": "00000000-c1a0-4000-8000-000000000001",
+          "classes": "tile state-running is-split",
+          "hidden": false,
+          "provider": "",
+          "status": "0:00:05"
+        },
+        {
+          "sessionId": "codex:00000000-c0de-4000-8000-000000000002",
+          "classes": "tile state-running is-split",
+          "hidden": false,
+          "provider": "Codex",
+          "status": "0:00:00"
+        }
+      ]
+    },
+    {
+      "name": "second-codex-closed",
+      "presence": false,
+      "showUnlinked": false,
+      "splitCount": 2,
+      "sessions": [
+        {
+          "sessionId": "codex:00000000-c0de-4000-8000-000000000001",
+          "provider": "codex",
+          "state": "done",
+          "workText": "Codex fixture answer",
+          "terminalClosed": false
+        },
+        {
+          "sessionId": "00000000-c1a0-4000-8000-000000000001",
+          "provider": "claude",
+          "state": "running",
+          "workText": "Claude fixture task",
+          "runningSince": 1790566395060,
+          "terminalClosed": false
+        }
+      ],
+      "counts": {
+        "running": 1,
+        "done": 1,
+        "confirm": 0,
+        "error": 0,
+        "total": 2
+      },
+      "tiles": [
+        {
+          "sessionId": "codex:00000000-c0de-4000-8000-000000000001",
+          "classes": "tile state-done is-split",
+          "hidden": false,
+          "provider": "Codex",
+          "status": "完了・たった今"
+        },
+        {
+          "sessionId": "00000000-c1a0-4000-8000-000000000001",
+          "classes": "tile state-running is-split",
+          "hidden": false,
+          "provider": "",
+          "status": "0:00:06"
+        }
+      ]
+    },
+    {
+      "name": "only-one-codex-open",
+      "presence": false,
+      "showUnlinked": false,
+      "splitCount": 0,
+      "sessions": [
+        {
+          "sessionId": "codex:00000000-c0de-4000-8000-000000000001",
+          "provider": "codex",
+          "state": "done",
+          "workText": "Codex fixture answer",
+          "terminalClosed": false
+        }
+      ],
+      "counts": {
+        "running": 0,
+        "done": 1,
+        "confirm": 0,
+        "error": 0,
+        "total": 1
+      },
+      "tiles": [
+        {
+          "classes": "tile state-done",
+          "hidden": false,
+          "provider": "Codex",
+          "status": "完了・たった今"
+        }
+      ]
+    },
+    {
+      "name": "all-terminals-closed",
+      "presence": false,
+      "showUnlinked": false,
+      "splitCount": 0,
+      "sessions": [
+        {
+          "sessionId": "codex:00000000-c0de-4000-8000-000000000001",
+          "provider": "codex",
+          "state": "done",
+          "workText": "Codex fixture answer",
+          "terminalClosed": true
+        }
+      ],
+      "counts": {
+        "running": 0,
+        "done": 1,
+        "confirm": 0,
+        "error": 0,
+        "total": 1
+      },
+      "tiles": [
+        {
+          "classes": "tile state-done",
+          "hidden": false,
+          "provider": "Codex",
+          "status": "完了・たった今"
+        }
+      ]
+    },
+    {
+      "name": "same-thread-reopened",
+      "presence": false,
+      "showUnlinked": false,
+      "splitCount": 0,
+      "sessions": [
+        {
+          "sessionId": "codex:00000000-c0de-4000-8000-000000000001",
+          "provider": "codex",
+          "state": "done",
+          "workText": "Codex fixture answer",
+          "terminalClosed": false
+        }
+      ],
+      "counts": {
+        "running": 0,
+        "done": 1,
+        "confirm": 0,
+        "error": 0,
+        "total": 1
+      },
+      "tiles": [
+        {
+          "classes": "tile state-done",
+          "hidden": false,
+          "provider": "Codex",
+          "status": "完了・たった今"
+        }
+      ]
+    }
+  ],
+  "sweepMs": 1500,
+  "codexPollMs": 300,
+  "eventPort": 64455,
+  "launches": [
+    {
+      "attempt": 1,
+      "cdpPort": 64456,
+      "stderrFile": "electron-1.stderr.log",
+      "stderrTail": "(node:71076) ExperimentalWarning: SQLite is an experimental feature and might change at any time\n(Use `electron --trace-warnings ...` to show where the warning was created)\n\r\nDevTools listening on ws://127.0.0.1:64456/devtools/browser/727ba892-6bdb-4a98-ab3e-23fa80ad91ef\r\nError: Failed to sync '<stdout>': ファンクションが間違っています。\r\n",
+      "pid": 71076,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "attempt": 2,
+      "cdpPort": 57740,
+      "stderrFile": "electron-2.stderr.log",
+      "stderrTail": "(node:85140) ExperimentalWarning: SQLite is an experimental feature and might change at any time\n(Use `electron --trace-warnings ...` to show where the warning was created)\n\r\nDevTools listening on ws://127.0.0.1:57740/devtools/browser/9288e273-392e-4ade-b16d-81905291918d\r\nError: Failed to sync '<stdout>': ファンクションが間違っています。\r\n",
+      "pid": 85140,
+      "exitCode": 0,
+      "signal": null
+    }
+  ]
+}

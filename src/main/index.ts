@@ -16,9 +16,11 @@ import type { MenuItemConstructorOptions } from "electron";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import type { ClickTarget, DropPayload, OpResult, Project, RegisterResult, SessionState, SessionView, Snapshot, ThemeSetting, WindowAction, WindowBounds } from "../shared/types";
+import type { ClickTarget, DropPayload, FocusProjectOptions, OpResult, Project, RegisterResult, SessionState, SessionView, Snapshot, ThemeSetting, WindowAction, WindowBounds } from "../shared/types";
 import { launchProjectApp } from "./app-launcher";
 import { createAppRestarter } from "./app-restart";
+import { CodexMonitor, codexHomes, codexMonitoringEnabled, codexSessionLiveness, mergeCodexViews } from "./codex-monitor";
+import { claudeInstructionsOf, codexInstructionsOf, mergeInstructions, type Instruction } from "./instructions";
 import { seedDemo } from "./demo";
 import { detectDevScript, DevServerManager } from "./dev-server";
 import { extractDropPaths } from "./drop-paths";
@@ -77,7 +79,7 @@ import {
   turnEndOf,
 } from "./session-scan";
 import { fmtStats, parseStatusLinePayload } from "./statusline";
-import { blockReasonToWorkText, classifyNotification, countTiles, StateStore } from "./state-store";
+import { blockReasonToWorkText, classifyNotification, countTiles, normalizePath, StateStore } from "./state-store";
 import { fmtWindowBounds } from "./window-bounds";
 import {
   applyProjectWindowPlacement,
@@ -86,9 +88,26 @@ import {
   isAvailable as windowApiAvailable,
   listTopLevelWindows,
   readProjectWindowPlacement,
+  revealPointer,
   type TopLevelWindow,
 } from "./window-control";
-import { computeWindowPresence, presenceDiff, presenceEquals, WINDOW_POLL_INTERVAL_MS, type WindowPresence } from "./window-presence";
+import { computeWindowPresence, presenceDiff, presenceEquals, projectWindowPresent, WINDOW_POLL_INTERVAL_MS, type WindowPresence } from "./window-presence";
+import {
+  agentsByPane,
+  applyOrcaCodexConfirm,
+  fetchOrcaWorktrees,
+  launchInOrca,
+  openChangedInOrca,
+  orcaSleepingPathSet,
+  orcaWorktreePathSet,
+  readOrcaScreen,
+  readPaneKeysBySession,
+  sendToOrcaSession,
+  switchOrcaTerminal,
+  TARGET_LABEL,
+  type OrcaAgent,
+  type OrcaInput,
+} from "./orca";
 
 function argValue(name: string): string | undefined {
   const prefix = `--${name}=`;
@@ -119,6 +138,7 @@ if (process.env.TERMINAL_APP_DATA_DIR) {
 const logger = new Logger(dataDir);
 const projectStore = new ProjectStore(dataDir, logger);
 const stateStore = new StateStore();
+const codexMonitor = new CodexMonitor();
 /**
  * Jev（TypeSafe AI の判断専用モデル）クライアント（260922_2）。デモ・env TERMINAL_APP_JEV=off・キー無しでは
  * 常に「判定なし」= 従来の表示ロジックだけで動く。判定は追加層（返答待ち／危険度／作業テキスト／停滞）
@@ -131,6 +151,30 @@ let statusMessage = "";
 let pinned = false;
 /** 未接続タイル（260903_1）: projectId → 対象アプリのウィンドウ有無。pollWindowPresence が更新（デモはシード固定値） */
 let windowPresence: WindowPresence = {};
+/**
+ * Orca で開いているフォルダ（正規化済み。261005_1）。pollWindowPresence が Orca の窓があるときだけ CLI で更新する。
+ * null = 未取得・取得失敗（Orca 対象のタイルは窓の有無だけで判定 = 灰色にしない側）
+ */
+let orcaPaths: Set<string> | null = null;
+let orcaFetching = false;
+let orcaFetchFailed = false;
+/** Orca のタブ切替要求の通し番号。連続クリック時に古い要求の結果を捨てる */
+let orcaSwitchSeq = 0;
+/** Orca のエージェント状態（paneKey → 状態）と、セッション ID → paneKey（261005_2: Codex の承認待ち検知） */
+let orcaAgents = new Map<string, OrcaAgent>();
+let orcaPaneBySession = new Map<string, string>();
+/** orcaAgents を最後に取得できた時刻 */
+let orcaAgentsAt = 0;
+/**
+ * Orca でスリープ中のフォルダ（正規化済み。261005_4）。Orca の「スリープ」は専用の記録を持たず、
+ * ターミナルを全部閉じる操作のため、「Orca に登録済みで生きているターミナルが 0」をスリープ中とみなす
+ */
+let orcaSleepingPaths = new Set<string>();
+
+/** Orca 対象のプロジェクトが Orca でスリープ中か */
+function isOrcaSleeping(project: Project): boolean {
+  return project.clickTarget === "orca" && orcaSleepingPaths.has(normalizePath(project.path));
+}
 
 /** NFR-01 計測: revision → イベント受信時刻。renderer の描画完了通知でログ差分を出す（verification.md 3.2） */
 const pendingRender = new Map<number, number>();
@@ -139,8 +183,10 @@ function buildSnapshot(): Snapshot {
   const config = { ...projectStore.config };
   if (themeOverride !== undefined) config.theme = themeOverride;
   const projects = projectStore.projects;
-  const sessions = stateStore.displaySessions(projects);
-  const splitSessions = stateStore.splitSessions(projects);
+  const { sessions, splitSessions } = mergeCodexViews(projects, {
+    sessions: stateStore.displaySessions(projects),
+    splitSessions: stateStore.splitSessions(projects),
+  }, codexViewsWithOrca());
   // 件数は「画面に出るタイル」基準（260904_1 #3: 分割タイルはそれぞれ 1 件）。renderer は表示整形のみ行う
   const tiles: SessionView[] = [];
   for (const p of projects) {
@@ -158,6 +204,7 @@ function buildSnapshot(): Snapshot {
     pinned,
     statusMessage,
     windowPresence: { ...windowPresence },
+    sleeping: Object.fromEntries(projects.filter((p) => isOrcaSleeping(p)).map((p) => [p.id, true])),
   };
 }
 
@@ -632,6 +679,19 @@ function createAppEventServer(): EventServer {
 /* ---------------- 切断検知（260712_2） ---------------- */
 
 let livenessTimer: NodeJS.Timeout | null = null;
+let codexPollTimer: NodeJS.Timeout | null = null;
+let codexWasAvailable: boolean | undefined;
+
+function pollCodexSessions(): void {
+  if (!codexMonitoringEnabled(projectStore.config.monitorCodex)) return;
+  const changed = codexMonitor.refresh(projectStore.projects);
+  if (codexWasAvailable !== codexMonitor.available) {
+    codexWasAvailable = codexMonitor.available;
+    // 会話名・本文はログに出さない。
+    logger.info(`Codex 監視: ${codexMonitor.available ? "ローカル履歴に接続" : "履歴を取得できません（次回再試行）"}`);
+  }
+  if (changed) broadcast();
+}
 /** 未接続タイル（260903_1）のウィンドウ有無ポーリング */
 let windowPollTimer: NodeJS.Timeout | null = null;
 /** 初回判定済みか（初回ログの要約用） */
@@ -639,6 +699,10 @@ let windowPollDone = false;
 
 const appRestarter = createAppRestarter({
   cleanup: async () => {
+    if (codexPollTimer !== null) {
+      clearInterval(codexPollTimer);
+      codexPollTimer = null;
+    }
     // app.exit() は will-quit を発火しないため、再起動経路では定期処理とサーバを明示的に止める。
     if (livenessTimer !== null) {
       clearInterval(livenessTimer);
@@ -701,6 +765,7 @@ function showSessionToast(project: Project | null, title: string, body: string):
     const outcome = focusProjectWindow(project.clickTarget, path.basename(project.path));
     logger.info(`通知クリックで前面化 ${outcome.ok ? "成功" : "失敗"}: ${project.name} → ${project.clickTarget}${outcome.message ? ` (${outcome.message})` : ""}`);
     if (!outcome.ok) focusOwnWindow();
+    else if (project.clickTarget === "orca" && !isOrcaSleeping(project)) switchToOrcaTab(project);
   });
   n.show();
 }
@@ -929,7 +994,9 @@ function sweepLiveness(): void {
     const project = projectStore.getProject(projectId);
     if (project === null || !windowApiAvailable()) return null; // 判定不能 → liveness-monitor 側で安全側に扱う
     if (windows === null) windows = listTopLevelWindows();
-    return hasWindowFor(project.clickTarget, path.basename(project.path), windows);
+    // Orca は窓の有無だけを補助シグナルにする（親フォルダの Orca ターミナルで動くセッションを
+    // フォルダ一覧に無いという理由で切断扱いにしない。灰色表示の判定は pollWindowPresence 側で厳密に行う）
+    return projectWindowPresent(project, windows, null);
   };
   // 無更新の判定は subagent 記録も含めた最終活動時刻で行い、登録簿が busy の間は切断しない（260907_1 R4）
   const hits = findDisconnected(rest, {
@@ -943,8 +1010,10 @@ function sweepLiveness(): void {
     changed = true;
     const project = projectStore.getProject(t.projectId);
     const name = project?.name ?? t.projectId;
-    logger.warn(`切断検知: ${name} (session=${t.sessionId}) — transcript 更新途絶`);
-    showDisconnectToast(project, name);
+    // Orca でスリープさせた（ターミナルを閉じた）プロジェクトは意図した停止のため通知しない（261005_4）
+    const sleeping = project !== null && isOrcaSleeping(project);
+    logger.warn(`切断検知: ${name} (session=${t.sessionId}) — transcript 更新途絶${sleeping ? "（Orca でスリープ中のため通知しない）" : ""}`);
+    if (!sleeping) showDisconnectToast(project, name);
   }
   if (changed) broadcast();
 }
@@ -958,10 +1027,13 @@ function sweepLiveness(): void {
  * koffi 未ロード（判定不能）のときは空マップ = renderer は全タイルを「接続あり」扱いにする（安全側）。
  */
 function pollWindowPresence(): void {
+  if (demoMode) return; // デモはシードの固定値を見せる（設定変更等からの呼び出しで上書きしない）
   let next: WindowPresence = {};
   if (windowApiAvailable() && projectStore.projects.length > 0) {
     try {
-      next = computeWindowPresence(projectStore.projects, listTopLevelWindows());
+      const windows = listTopLevelWindows();
+      refreshOrcaPaths(windows);
+      next = computeWindowPresence(projectStore.projects, windows, orcaPaths);
     } catch (e) {
       logger.warn(`ウィンドウ有無の判定に失敗（前回値を維持）: ${String(e)}`);
       return;
@@ -985,6 +1057,158 @@ function pollWindowPresence(): void {
   broadcast();
 }
 
+/**
+ * Orca のフォルダ一覧を非同期に取り直す（261005_1）。Orca 対象のプロジェクトがあり、Orca の窓があるときだけ
+ * CLI を呼ぶ（Orca が閉じていれば窓判定だけで未接続になるため不要）。一覧が変わったら判定をやり直す
+ */
+function refreshOrcaPaths(windows: readonly TopLevelWindow[]): void {
+  if (orcaFetching) return;
+  // 取得する理由: Orca 対象タイルの接続判定、または実行中の Codex の承認待ち検知（261005_2。クリック先の設定は問わない）
+  const wantPaths = projectStore.projects.some((p) => p.clickTarget === "orca");
+  const wantCodex = codexMonitor.sessions.some((s) => s.provider === "codex" && s.state === "running");
+  if (!wantPaths && !wantCodex) {
+    setOrcaAgents(new Map(), new Map());
+    return;
+  }
+  if (!hasWindowFor("orca", "", windows)) {
+    orcaPaths = null;
+    setOrcaAgents(new Map(), new Map());
+    if (orcaSleepingPaths.size > 0) {
+      orcaSleepingPaths = new Set(); // Orca を閉じたら「スリープ中」ではなく未接続
+      broadcast();
+    }
+    return;
+  }
+  orcaFetching = true;
+  void fetchOrcaWorktrees()
+    .then((worktrees) => {
+      // 取得失敗（タイムアウト・打ち切り）は 30 秒まで前回値を保つ（Codex の確認待ちが 1 回の失敗で外れて
+      // 並びが跳ねないように。失敗が続くときは古い確認待ちを残し続けない）
+      if (worktrees !== null) {
+        orcaAgentsAt = Date.now();
+        setOrcaAgents(agentsByPane(worktrees), readPaneKeysBySession());
+      } else if (Date.now() - orcaAgentsAt > 30_000) {
+        setOrcaAgents(new Map(), new Map());
+      }
+      const next = worktrees === null ? null : orcaWorktreePathSet(worktrees);
+      if (worktrees === null && !orcaFetchFailed) logger.warn("Orca のフォルダ一覧を取得できません（Orca 対象のタイルは窓の有無だけで判定）");
+      if (worktrees !== null && orcaFetchFailed) logger.info("Orca のフォルダ一覧の取得が回復しました");
+      orcaFetchFailed = worktrees === null;
+      const prev = orcaPaths;
+      const changed = next === null || prev === null
+        ? next !== prev
+        : next.size !== prev.size || [...next].some((p) => !prev.has(p));
+      orcaPaths = next;
+      if (changed) pollWindowPresence(); // orcaFetching 中のため再取得はしない
+      // スリープ中のフォルダ（261005_4）。取得失敗のときは前回値を保つ
+      if (worktrees !== null) {
+        const sleeping = orcaSleepingPathSet(worktrees);
+        const sleepChanged = sleeping.size !== orcaSleepingPaths.size || [...sleeping].some((p) => !orcaSleepingPaths.has(p));
+        orcaSleepingPaths = sleeping;
+        if (sleepChanged) broadcast();
+      }
+    })
+    .finally(() => {
+      orcaFetching = false;
+    });
+}
+
+/** Codex 表示に Orca の承認待ちを重ねた結果（buildSnapshot と変化判定で同じものを使う） */
+function codexViewsWithOrca(): SessionView[] {
+  return applyOrcaCodexConfirm(codexMonitor.sessions, orcaPaneBySession, orcaAgents);
+}
+
+/** Orca のエージェント状態を差し替え、Codex の表示が変わったら配信する（261005_2） */
+function setOrcaAgents(agents: Map<string, OrcaAgent>, paneBySession: Map<string, string>): void {
+  const before = JSON.stringify(codexViewsWithOrca());
+  orcaAgents = agents;
+  orcaPaneBySession = paneBySession;
+  if (JSON.stringify(codexViewsWithOrca()) !== before) broadcast();
+}
+
+/** 右クリックメニューの Orca 専用項目（261005_2）。Orca 対象のプロジェクトだけに出す */
+function orcaMenuItems(project: Project, sessionId: string | undefined): MenuItemConstructorOptions[] {
+  if (project.clickTarget !== "orca") return [];
+  return [
+    {
+      label: "Orca: 画面を見て返信…",
+      click: () => { win?.webContents.send("orca-panel-request", project.id, sessionId ?? null); },
+    },
+    {
+      label: "Orca で変更ファイルを開く（差分）",
+      click: () => {
+        // メニュー操作の直後 = 前面化の権限内。先に Orca を前面へ出してから CLI で差分タブを開く
+        focusProjectWindow("orca", path.basename(project.path));
+        void openChangedInOrca(project.path).then((r) => {
+          logger.info(`Orca 変更ファイル表示 ${r.ok ? "成功" : "失敗"}: ${project.name}${r.message ? ` (${r.message})` : ""}`);
+          if (!r.ok && r.message !== undefined) setStatus(r.message);
+        });
+      },
+    },
+  ];
+}
+
+/** 指示の履歴（261005_3）。Codex は保存先を順に試し、Claude は記録済みの transcript（無ければ探索）を読む */
+function instructionsOf(view: SessionView): Instruction[] {
+  if (view.provider === "codex") {
+    // 保存先ごとに DB の更新が揃わない（Orca 側だけ新しい等）ため、全部から集めて時刻順に並べ直す
+    const threadId = view.sessionId.replace(/^codex:/, "");
+    return mergeInstructions(codexHomes().map((home) => codexInstructionsOf(home, threadId) ?? []));
+  }
+  const transcript = stateStore.snapshotOf(view.sessionId)?.transcriptPath ?? findClaudeTranscript(view.sessionId);
+  return transcript === undefined ? [] : claudeInstructionsOf(transcript);
+}
+
+/** ~/.claude/projects/<各フォルダ>/<sessionId>.jsonl を探す（サブフォルダ起動で munge 名が登録パスと違う場合も拾う） */
+function findClaudeTranscript(sessionId: string): string | undefined {
+  if (!/^[0-9a-f-]{36}$/i.test(sessionId)) return undefined;
+  const root = path.join(os.homedir(), ".claude", "projects");
+  try {
+    for (const dir of fs.readdirSync(root)) {
+      const file = path.join(root, dir, `${sessionId}.jsonl`);
+      if (fs.existsSync(file)) return file;
+    }
+  } catch {
+    /* 無ければ表示なし */
+  }
+  return undefined;
+}
+
+/**
+ * Orca へ入力を送ってよいほどセッションが確かに生きているか（261005_2）。
+ * Claude はセッション登録簿の PID、Codex は writer lock。判定不能（unknown）も送らない側に倒す
+ */
+function orcaSessionAlive(view: SessionView): boolean {
+  if (view.terminalClosed === true) return false;
+  if (view.provider === "codex") return codexSessionLiveness(view.sessionId.replace(/^codex:/, "")) === "alive";
+  return classifyLiveness(readSessionRegistry(), view.sessionId) === "alive";
+}
+
+/** 押したタイルのセッション（分割タイルはその枠。未指定は代表セッション） */
+function findSessionView(projectId: string, sessionId?: string): SessionView | undefined {
+  const snap = buildSnapshot();
+  const primary = snap.sessions[projectId];
+  if (sessionId === undefined || sessionId === "") return primary;
+  return (snap.splitSessions[projectId] ?? []).find((s) => s.sessionId === sessionId) ??
+    (primary?.sessionId === sessionId ? primary : undefined);
+}
+
+/**
+ * Orca 内のタブ切替（261005_1）。窓の前面化は呼び出し元が同期で済ませた後に呼ぶ
+ * （CLI は 0.5 秒前後かかり、待ってからでは前面化の権限が切れることがあるため）
+ */
+function switchToOrcaTab(project: Project, sessionId?: string): void {
+  const view = findSessionView(project.id, sessionId);
+  const seq = ++orcaSwitchSeq;
+  const hint = { sessionId: view?.sessionId, provider: view?.provider ?? "claude", state: view?.state };
+  void switchOrcaTerminal(project.path, hint, () => seq === orcaSwitchSeq)
+    .then((r) => {
+      if (r.superseded === true) return; // 後から押した別のタイルを優先する
+      logger.info(`Orca タブ切替 ${r.ok ? "成功" : "失敗"}: ${project.name}${r.message ? ` (${r.message})` : ""}`);
+      if (!r.ok && r.message !== undefined) setStatus(r.message);
+    });
+}
+
 /** D&D 登録（design.md 3.2(a): パス検証 → hooks マージ → projects 追加。失敗時は登録しない） */
 function registerProject(dirPath: string): RegisterResult {
   // 事前検証は ProjectStore と共通の validateProjectDir に集約
@@ -1003,7 +1227,7 @@ function registerProject(dirPath: string): RegisterResult {
   const sl = mergeStatusLine(dirPath, projectStore.config.port);
   if (!sl.ok) logger.warn(`statusLine 設定失敗（登録は続行）: ${dirPath} — ${sl.error}`);
   else if (sl.skipped === true) logger.info(`statusLine は既存のユーザー設定を尊重（設定せず）: ${dirPath}`);
-  const added = projectStore.addProject(dirPath);
+  const added = projectStore.addProject(dirPath, projectStore.config.defaultClickTarget ?? "cursor");
   if (!added.ok || added.project === undefined) {
     removeHooks(dirPath, ALL_HOOK_EVENTS); // 追加に失敗したらマージを巻き戻す
     removeStatusLine(dirPath);
@@ -1048,12 +1272,15 @@ async function unregisterProjectById(id: string): Promise<OpResult> {
 function reconnectProject(id: string): void {
   const project = projectStore.getProject(id);
   if (project === null) return;
+  codexMonitor.reconnect(id);
+  pollCodexSessions();
+  const codexCount = codexMonitor.sessions.filter((s) => s.projectId === id).length;
   const r = restoreProjectSessions(project, readSessionRegistry());
   const detail = r.concluded.length > 0 ? `（うち終了済み → 完了 ${r.concluded.length} 件）` : "";
   logger.info(`再接続: ${project.name} — 走査 ${r.found} 件 / 復元 ${r.revived} 件${detail}`);
   setStatus(
-    r.revived > 0
-      ? `再接続: ${project.name} のセッション ${r.revived} 件を復元しました${detail}`
+    r.revived + codexCount > 0
+      ? `再接続: ${project.name} のセッション ${r.revived + codexCount} 件を復元しました${detail}`
       : `再接続: ${project.name} に動作中のセッションは見つかりませんでした`
   );
   // 完了で復元したものは Jev で「返答待ち」かを一括判定（260922_3）
@@ -1294,7 +1521,18 @@ function devServerMenuItems(id: string, projectPath: string): Electron.MenuItemC
 function launchProject(id: string): void {
   const project = projectStore.getProject(id);
   if (project === null) return;
-  const appName = project.clickTarget === "cursor" ? "Cursor" : "ターミナル";
+  const appName = TARGET_LABEL[project.clickTarget];
+  if (project.clickTarget === "orca") {
+    // Orca は CLI でこのフォルダのターミナルを作って表示する（261005_1）。作成後に Orca の窓を前面へ
+    setStatus(`${project.name} を Orca で開いています…`);
+    void launchInOrca(project.path).then((r) => {
+      logger.info(`立ち上げ ${r.ok ? "成功" : "失敗"}: ${project.name} → orca${r.message ? ` (${r.message})` : ""}`);
+      if (r.ok) focusProjectWindow("orca", path.basename(project.path));
+      setStatus(r.ok ? `${project.name} を Orca で開きました` : (r.message ?? "立ち上げに失敗しました"));
+      pollWindowPresence();
+    });
+    return;
+  }
   const outcome = launchProjectApp(project.clickTarget, project.path);
   logger.info(
     `立ち上げ ${outcome.ok ? "成功" : "失敗"}: ${project.name} → ${project.clickTarget}${outcome.message ? ` (${outcome.message})` : ""}`
@@ -1309,6 +1547,9 @@ function clearProjectDisplay(id: string): void {
   const project = projectStore.getProject(id);
   if (project === null) return;
   stateStore.removeProjectSessions(id);
+  for (const session of [...codexMonitor.sessions]) {
+    if (session.projectId === id) codexMonitor.hide(session.sessionId);
+  }
   logger.info(`表示クリア: ${project.name}`);
   setStatus(`${project.name} の表示をクリアしました`);
 }
@@ -1317,7 +1558,7 @@ function clearProjectDisplay(id: string): void {
 function removeSessionDisplay(id: string, sessionId: string): void {
   const project = projectStore.getProject(id);
   if (project === null) return;
-  if (!stateStore.removeSession(sessionId)) return;
+  if (!codexMonitor.hide(sessionId) && !stateStore.removeSession(sessionId)) return;
   deadStrikes.delete(sessionId);
   lastNotifiedState.delete(sessionId);
   logger.info(`枠を消去: ${project.name} (session=${sessionId})`);
@@ -1596,7 +1837,9 @@ function wireIpc(): void {
     const launchLabel =
       project.clickTarget === "cursor"
         ? "立ち上げる（Cursor でこのフォルダを開く）"
-        : "立ち上げる（ターミナルをこのフォルダで開く）";
+        : project.clickTarget === "orca"
+          ? (isOrcaSleeping(project) ? "起こす（Orca でこのフォルダのターミナルを開く）" : "立ち上げる（Orca でこのフォルダのターミナルを開く）")
+          : "立ち上げる（ターミナルをこのフォルダで開く）";
     // ステータスサブメニュー（260727_1）: config.customStatuses の選択肢＋「（なし）」で解除。
     // 選択肢の追加・削除は設定画面から行う
     const statuses = projectStore.config.customStatuses;
@@ -1619,6 +1862,7 @@ function wireIpc(): void {
     ];
     const menu = Menu.buildFromTemplate([
       { label: launchLabel, click: () => { launchProject(id); } },
+      ...orcaMenuItems(project, sessionId),
       ...devServerMenuItems(id, project.path),
       { label: "再接続（動作中のセッションを拾い直す）", click: () => { reconnectProject(id); } },
       { label: "表示クリア（登録は維持）", click: () => { clearProjectDisplay(id); } },
@@ -1636,6 +1880,15 @@ function wireIpc(): void {
 
   ipcMain.handle("set-click-target", (_e, id: string, target: ClickTarget) => {
     projectStore.setClickTarget(id, target);
+    pollWindowPresence(); // 対象アプリが変わると接続判定も変わる（Orca はフォルダ一覧の取得が走る）
+    broadcast();
+  });
+
+  // 一括変更（261005_1）: 全プロジェクトのクリック先を揃え、以後の新規登録の既定にもする
+  ipcMain.handle("set-all-click-targets", (_e, target: ClickTarget) => {
+    const n = projectStore.setAllClickTargets(target);
+    logger.info(`クリック先を一括変更: ${target}（${n} 件）`);
+    pollWindowPresence();
     broadcast();
   });
 
@@ -1707,14 +1960,73 @@ function wireIpc(): void {
     broadcast();
   });
 
-  ipcMain.handle("focus-project", (_e, id: string) => {
+  // タイル外のタッチ終了（260925_2）: 前面化はしないが、Windows が隠したポインターを再表示する
+  ipcMain.on("touch-ended", () => {
+    revealPointer((ev) => logger.info(`${ev.message}: タイル外のタッチ`));
+  });
+
+  ipcMain.handle("focus-project", (_e, id: string, options?: FocusProjectOptions) => {
     const project = projectStore.getProject(id);
     if (project === null) return { ok: false, message: "プロジェクトが見つかりません" };
-    // クリック時点では本アプリがフォアグラウンド → SetForegroundWindow の権限内（design.md 7.2）
-    const outcome = focusProjectWindow(project.clickTarget, path.basename(project.path));
-    logger.info(`前面化 ${outcome.ok ? "成功" : "失敗"}: ${project.name} → ${project.clickTarget}${outcome.message ? ` (${outcome.message})` : ""}`);
+    // クリック時点では本アプリがフォアグラウンド → SetForegroundWindow の権限内（design.md 7.2）。
+    // タッチ操作のときはポインターを対象ウィンドウへ連れて行く（260925_1: 別画面で迷子になるため）
+    const viaTouch = options?.viaTouch === true;
+    const outcome = focusProjectWindow(project.clickTarget, path.basename(project.path), {
+      warpPointer: viaTouch,
+      onWarpEvent: (ev) => logger.info(`${ev.message}: ${project.name}`),
+    });
+    logger.info(`前面化 ${outcome.ok ? "成功" : "失敗"}: ${project.name} → ${project.clickTarget}${viaTouch ? "（タッチ: ポインター移動）" : ""}${outcome.message ? ` (${outcome.message})` : ""}`);
     setStatus(outcome.ok ? "" : (outcome.message ?? "前面化に失敗しました"));
+    // Orca は窓が 1 枚のため、前面化の後に押したセッションのタブへ切り替える（261005_1）。
+    // スリープ中は切り替え先のターミナルが無い。起こすのは右クリックの「起こす」（ターミナルを作る）に任せる（261005_4）
+    if (outcome.ok && isOrcaSleeping(project)) {
+      setStatus(`${project.name} は Orca でスリープ中です。起こすときはタイル右クリック →「起こす」`);
+    } else if (outcome.ok && project.clickTarget === "orca") {
+      switchToOrcaTab(project, options?.sessionId);
+    }
     return outcome;
+  });
+
+  // 指示の履歴（261005_3）。そのセッションでユーザーが送った指示を新しい順に返す。本文はログに残さない
+  ipcMain.handle("session-instructions", (_e, id: string, sessionId?: string) => {
+    const project = projectStore.getProject(id);
+    if (project === null) return { ok: false, items: [] };
+    const view = findSessionView(id, sessionId);
+    if (view === undefined) return { ok: true, items: [] };
+    try {
+      return { ok: true, items: instructionsOf(view) };
+    } catch {
+      return { ok: false, items: [] };
+    }
+  });
+
+  // Orca の画面プレビュー（261005_2）。画面の内容はログに残さない
+  ipcMain.handle("orca-read-screen", async (_e, id: string, sessionId?: string) => {
+    const project = projectStore.getProject(id);
+    if (project === null || project.clickTarget !== "orca") return { ok: false, message: "Orca 対象のプロジェクトではありません" };
+    const view = findSessionView(id, sessionId);
+    const r = await readOrcaScreen(project.path, { sessionId: view?.sessionId, provider: view?.provider ?? "claude", state: view?.state });
+    // 送信可否は orca-send と同じ条件（セッション指定あり・プロセスが生存）まで含めて返す
+    return { ...r, exact: r.exact === true && sessionId !== undefined && view !== undefined && orcaSessionAlive(view) };
+  });
+
+  // Orca のターミナルへ返信・中断（261005_2）。セッション ID で正確に特定できたターミナルにだけ送る。
+  // 送った本文はログに残さない（文字数のみ）
+  ipcMain.handle("orca-send", async (_e, id: string, sessionId: string | undefined, input: OrcaInput) => {
+    const project = projectStore.getProject(id);
+    if (project === null || project.clickTarget !== "orca") return { ok: false, message: "Orca 対象のプロジェクトではありません" };
+    if (input?.kind !== "text" && input?.kind !== "escape") return { ok: false, message: "送信内容が不正です" };
+    if (input.kind === "text" && typeof input.text !== "string") return { ok: false, message: "送信内容が不正です" };
+    // 送信先は明示されたセッションだけ（代表セッションへの読み替えはしない。開いた後に入れ替わった別セッションへ送らない）
+    if (typeof sessionId !== "string" || sessionId === "") return { ok: false, message: "送信先のセッションが決まっていません" };
+    const view = findSessionView(id, sessionId);
+    if (view === undefined || view.sessionId !== sessionId) return { ok: false, message: "このセッションはもう表示されていません" };
+    // 終了したセッションのペインは素のシェルに戻っている。プロセスの生存を確認できたときだけ送る
+    if (!orcaSessionAlive(view)) return { ok: false, message: "このセッションは終了しているため送信しません" };
+    const r = await sendToOrcaSession(view.sessionId, input, view.provider ?? "claude");
+    const what = input.kind === "escape" ? "中断（Esc）" : `返信（${input.text.length} 文字）`;
+    logger.info(`Orca へ${what} ${r.ok ? "送信" : "失敗"}: ${project.name}${r.message ? ` (${r.message})` : ""}`);
+    return r;
   });
 
   ipcMain.on("window-action", (_e, action: WindowAction) => {
@@ -1856,6 +2168,11 @@ void app.whenReady().then(async () => {
   );
   // 切断検知の定期掃引（260712_2）。デモ実行はシードに transcript が無く対象外
   if (!demoMode) {
+    pollCodexSessions();
+    if (codexMonitoringEnabled(projectStore.config.monitorCodex)) {
+      const interval = Number(process.env.TERMINAL_APP_CODEX_POLL_MS ?? "5000");
+      codexPollTimer = setInterval(pollCodexSessions, Number.isFinite(interval) && interval >= 250 ? interval : 5000);
+    }
     restoreSessionSnapshot(); // 前回の表示を復元（260922_7）— transcript 走査より先に取り込み、続きから見えるようにする
     void restoreSessionsAtStartup(); // 起動時復元（260922_3）: 待機になった全タイルを transcript と登録簿から復元し、Jev で返答待ちを拾う
     livenessTimer = setInterval(sweepLiveness, DISCONNECT_CHECK_INTERVAL_MS);
@@ -1870,6 +2187,7 @@ app.on("window-all-closed", () => {
 });
 
 app.on("will-quit", () => {
+  if (codexPollTimer !== null) clearInterval(codexPollTimer);
   if (snapshotSaveTimer !== null) clearTimeout(snapshotSaveTimer);
   writeSessionSnapshot(); // 次回起動で続きから見えるように最後の状態を残す（260922_7）
   if (livenessTimer !== null) clearInterval(livenessTimer);

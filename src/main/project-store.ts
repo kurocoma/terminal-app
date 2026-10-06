@@ -55,6 +55,12 @@ export function validateProjectDir(
   return { ok: true };
 }
 
+const CLICK_TARGETS: readonly ClickTarget[] = ["cursor", "orca", "terminal"];
+
+export function isClickTarget(value: unknown): value is ClickTarget {
+  return typeof value === "string" && (CLICK_TARGETS as readonly string[]).includes(value);
+}
+
 function defaultConfig(): AppConfig {
   return {
     version: 1,
@@ -136,6 +142,13 @@ export class ProjectStore {
     if (typeof this._config.showUnlinked !== "boolean") {
       this._config.showUnlinked = true;
     }
+    // クリック先（261005_1）: 手編集・未知の値は従来の既定（cursor / 既定なし）へ戻す
+    if (this._config.defaultClickTarget !== undefined && !isClickTarget(this._config.defaultClickTarget)) {
+      delete this._config.defaultClickTarget;
+    }
+    for (const p of this._projects) {
+      if (!isClickTarget(p.clickTarget)) p.clickTarget = "cursor";
+    }
   }
 
   /**
@@ -179,10 +192,28 @@ export class ProjectStore {
 
   setClickTarget(id: string, target: ClickTarget): boolean {
     const p = this._projects.find((x) => x.id === id);
-    if (!p) return false;
+    if (!p || !isClickTarget(target)) return false;
     p.clickTarget = target;
     this.saveProjects();
     return true;
+  }
+
+  /**
+   * 一括変更（261005_1）: 全プロジェクトのクリック先を揃え、以後の新規登録の既定にもする。
+   * 戻り値 = 変更したプロジェクト数（不正値は何もしない = -1）
+   */
+  setAllClickTargets(target: ClickTarget): number {
+    if (!isClickTarget(target)) return -1;
+    let changed = 0;
+    for (const p of this._projects) {
+      if (p.clickTarget === target) continue;
+      p.clickTarget = target;
+      changed += 1;
+    }
+    this._config.defaultClickTarget = target;
+    this.saveConfig();
+    if (changed > 0) this.saveProjects();
+    return changed;
   }
 
   /** 手動ステータスの割り当て（260727_1）。null で解除。選択肢に無い値は拒否する */

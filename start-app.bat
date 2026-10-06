@@ -19,5 +19,5 @@ if not exist "dist\main\index.js" (
 )
 
 REM Electron ��؂藣���ċN�����A���� bat �̍�����ʂ͂�������
-start "" /D "%~dp0" "%~dp0node_modules\electron\dist\electron.exe" .
+start "" /D "%~dp0" "%~dp0node_modules\electron\dist\electron.exe" . >nul 2>&1
 exit /b 0

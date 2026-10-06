@@ -214,6 +214,18 @@ body {
   color: var(--accent);
 }
 
+/* Codex の識別表示。状態を示す色と混ざらない控えめなラベル */
+.tile-provider {
+  flex: none;
+  font-size: 9px;
+  line-height: 1;
+  padding: 3px 5px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
 /* 今やっているタスク（260922_10）: Claude Code が書く ai-title。名前より控えめに、1 行で省略 */
 .tile-task {
   font-size: 10px;
@@ -640,3 +652,90 @@ body {
 .btn-secondary:hover { color: var(--text); background: rgba(128, 140, 160, 0.12); }
 .btn-primary { background: var(--accent); color: #fff; border: 1px solid transparent; }
 .btn-primary:hover { filter: brightness(1.08); }
+
+/* ---------------- Orca: 画面プレビュー・返信（261005_2） ---------------- */
+
+#orca-peek {
+  position: fixed;
+  z-index: 55;
+  max-width: min(560px, calc(100vw - 16px));
+  padding: 8px 10px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 12px 32px var(--shadow);
+  pointer-events: none; /* プレビューがタイルのクリック・ホバーを奪わない */
+}
+#orca-peek-text, #orca-screen {
+  margin: 0;
+  font-family: "Cascadia Mono", Consolas, "MS Gothic", monospace;
+  font-size: 11px;
+  line-height: 1.35;
+  white-space: pre;
+  overflow: hidden;
+  color: var(--text);
+}
+#orca-dialog {
+  position: fixed; inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 60;
+}
+.orca-card { width: min(760px, calc(100vw - 32px)); }
+#orca-screen {
+  max-height: min(52vh, 460px);
+  overflow: auto;
+  padding: 8px 10px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  user-select: text;
+}
+.orca-reply { display: flex; gap: 8px; }
+#orca-input {
+  flex: 1;
+  min-width: 0;
+  padding: 7px 10px;
+  background: var(--bg); color: var(--text);
+  border: 1px solid var(--border); border-radius: 8px;
+  font: inherit; font-size: 13px;
+  user-select: text;
+}
+#orca-input:focus { outline: 1px solid var(--accent); }
+#orca-input:disabled, #orca-send:disabled, #orca-esc:disabled { opacity: 0.45; cursor: default; }
+
+/* ---------------- 指示の履歴（261005_3） ---------------- */
+
+.instr-list { display: flex; flex-direction: column; gap: 4px; }
+.instr-head { font-size: 10.5px; font-weight: 600; color: var(--text-dim); letter-spacing: 0.02em; }
+.instr-item { display: flex; gap: 8px; align-items: baseline; font-size: 11.5px; line-height: 1.45; }
+.instr-time { flex: none; font-size: 10.5px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.instr-text {
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+  color: var(--text);
+}
+.instr-item.is-latest .instr-text { font-weight: 600; } /* 直近の指示を目立たせる */
+#orca-peek .instr-list + #orca-peek-text:not([hidden]) {
+  margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border);
+}
+#orca-instr {
+  max-height: 150px; overflow: auto;
+  padding: 6px 8px;
+  border: 1px solid var(--border); border-radius: 8px;
+  user-select: text;
+}
+#orca-instr .instr-text { -webkit-line-clamp: 4; }
+
+/* ---------------- Orca でスリープ中のタイル（261005_4） ---------------- */
+
+.tile.is-sleeping { opacity: 0.62; border-style: dashed; border-color: var(--border); }
+.tile.is-sleeping:hover { opacity: 0.85; }
+.tile.is-sleeping .tile-glow { animation: none; opacity: 0; }
+.tile.is-sleeping .tile-icon,
+.tile.is-sleeping .tile-status { color: var(--text-dim); }
