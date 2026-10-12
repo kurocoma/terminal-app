@@ -375,7 +375,7 @@ export async function switchOrcaTerminal(
   hint?: OrcaSessionHint,
   /** 後から別のタイルが押されたら false（古い要求で最後の選択を上書きしない） */
   isCurrent: () => boolean = () => true,
-): Promise<OrcaOutcome & { superseded?: boolean }> {
+): Promise<OrcaOutcome & { superseded?: boolean; noTerminal?: boolean }> {
   const [terms, wts] = await Promise.all([
     runOrcaCli(["terminal", "list", "--limit", LIST_LIMIT]),
     runOrcaCli(["worktree", "ps", "--limit", LIST_LIMIT]),
@@ -389,7 +389,8 @@ export async function switchOrcaTerminal(
     projectPath,
     hint,
   });
-  if (target === null) return { ok: false, message: "Orca にこのフォルダのターミナルがありません" };
+  // noTerminal: フォルダ未登録かターミナル 0 本。呼び出し側はこのときだけ「立ち上げる」に切り替える（261013_1）
+  if (target === null) return { ok: false, noTerminal: true, message: "Orca にこのフォルダのターミナルがありません" };
   const r = await runOrcaCli(["terminal", "switch", "--terminal", target.handle]);
   return r.ok ? { ok: true } : { ok: false, message: r.message };
 }
@@ -414,6 +415,12 @@ export async function launchInOrca(projectPath: string): Promise<OrcaOutcome> {
   }
   let r = await create();
   if (!r.ok && r.code === "selector_not_found") {
+    // CLI の repo add は git 管理のフォルダ限定（261013_1 実測: "Not a valid git repository"。
+    // エラー本文は parseCliOutput が落とすので .git の有無で先に判定する）。
+    // git 管理外は Orca の画面から「フォルダを追加」してもらうしかないので、その案内を返す
+    if (!fs.existsSync(path.join(projectPath, ".git"))) {
+      return { ok: false, message: `${path.basename(projectPath)} は git 管理外のため Orca の CLI から登録できません。Orca の画面でフォルダを追加してから、もう一度クリックしてください` };
+    }
     const added = await runOrcaCli(["repo", "add", "--path", projectPath], 20_000);
     if (!added.ok) return { ok: false, message: `Orca にこのフォルダを追加できませんでした（${added.code}）` };
     r = await create();

@@ -1205,6 +1205,12 @@ function switchToOrcaTab(project: Project, sessionId?: string): void {
     .then((r) => {
       if (r.superseded === true) return; // 後から押した別のタイルを優先する
       logger.info(`Orca タブ切替 ${r.ok ? "成功" : "失敗"}: ${project.name}${r.message ? ` (${r.message})` : ""}`);
+      // Orca に無いフォルダ（未登録・ターミナル 0 本）は、右クリックの「立ち上げる」と同じ手順で開く（261013_1）。
+      // Orca は CLI でフォルダ登録まで済むので、Cursor と違いクリックだけで開ける
+      if (!r.ok && r.noTerminal === true) {
+        launchProject(project.id);
+        return;
+      }
       if (!r.ok && r.message !== undefined) setStatus(r.message);
     });
 }
