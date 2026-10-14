@@ -76,12 +76,12 @@ const CLICK_TARGETS: ClickTarget[] = ["cursor", "orca", "terminal"];
 
 /** Orca でスリープ中のタイル（261005_4） */
 const SLEEPING_ICON = "☾";
-const SLEEPING_HINT = "Orca でスリープ中です（ターミナルを閉じて休ませている状態）。クリックか右クリック →「起こす」で再開できます";
+const SLEEPING_HINT = "Orca でスリープ中です（ターミナルを閉じて休ませている状態）。右クリック →「起こす」で再開できます";
 const TARGET_LABEL: Record<ClickTarget, string> = { cursor: "Cursor", orca: "Orca", terminal: "ターミナル" };
 
 const UNLINKED_HINT: Record<ClickTarget, string> = {
   cursor: "Cursor でこのフォルダを開いているウィンドウが見つかりません。右クリック →「立ち上げる」で開けます",
-  orca: "Orca でこのフォルダが開かれていません（Orca が起動していないか、ワークスペースに無い）。クリックすると Orca に登録してターミナルを開きます（git 管理外は右クリック →「Orca に登録」）",
+  orca: "Orca でこのフォルダが開かれていません（Orca が起動していないか、ワークスペースに無い）。右クリック →「Orca に登録」で繋げられます",
   terminal: "このフォルダを開いているターミナルのウィンドウが見つかりません。右クリック →「立ち上げる」で開けます",
 };
 

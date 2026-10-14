@@ -1189,7 +1189,7 @@ async function registerProjectInOrca(id: string): Promise<void> {
   }
   logger.info(`Orca 登録 ${r.ok ? "成功" : "失敗"}: ${project.name}${r.already === true ? "（登録済み）" : ""}${r.message ? ` (${r.message})` : ""}`);
   // 登録直後はターミナルが 0 本 = Orca の一覧上は「スリープ中」になる。開くのは「起こす」（261005_4 の設計のまま）
-  setStatus(r.ok ? `${project.name} を Orca に登録しました。タイルをクリックするとターミナルを開きます` : (r.message ?? "Orca への登録に失敗しました"));
+  setStatus(r.ok ? `${project.name} を Orca に登録しました。ターミナルは右クリック →「起こす」で開けます` : (r.message ?? "Orca への登録に失敗しました"));
   pollWindowPresence();
 }
 
@@ -1261,10 +1261,10 @@ function switchToOrcaTab(project: Project, sessionId?: string): void {
     .then((r) => {
       if (r.superseded === true) return; // 後から押した別のタイルを優先する
       logger.info(`Orca タブ切替 ${r.ok ? "成功" : "失敗"}: ${project.name}${r.message ? ` (${r.message})` : ""}`);
-      // Orca に無いフォルダ（未登録・ターミナル 0 本）は、右クリックの「立ち上げる」と同じ手順で開く（261013_1）。
-      // Orca は CLI でフォルダ登録まで済むので、Cursor と違いクリックだけで開ける
+      // クリックは「繋がっている Orca のタブへ移る」だけ。ターミナルは作らない（261015_4。仕様 261005_1 に戻す）。
+      // 繋がっていないフォルダは右クリックで繋げる（「Orca に登録」/「立ち上げる」）
       if (!r.ok && r.noTerminal === true) {
-        launchProject(project.id);
+        setStatus(`${project.name} は Orca に繋がっていません。右クリック →「Orca に登録」で繋げられます`);
         return;
       }
       if (!r.ok && r.message !== undefined) setStatus(r.message);
@@ -2040,10 +2040,9 @@ function wireIpc(): void {
     logger.info(`前面化 ${outcome.ok ? "成功" : "失敗"}: ${project.name} → ${project.clickTarget}${viaTouch ? "（タッチ: ポインター移動）" : ""}${outcome.message ? ` (${outcome.message})` : ""}`);
     setStatus(outcome.ok ? "" : (outcome.message ?? "前面化に失敗しました"));
     // Orca は窓が 1 枚のため、前面化の後に押したセッションのタブへ切り替える（261005_1）。
-    // スリープ中（ターミナル 0 本）は切り替え先が無いので、クリックで起こす（ターミナルを作る。261015_3。
-    // 261005_4 では右クリック「起こす」だけにしていたが、「クリックしても開かない」と見えるため変更）
+    // スリープ中は切り替え先のターミナルが無い。起こすのは右クリックの「起こす」（ターミナルを作る）に任せる（261005_4）
     if (outcome.ok && isOrcaSleeping(project)) {
-      launchProject(id);
+      setStatus(`${project.name} は Orca でスリープ中です。起こすときはタイル右クリック →「起こす」`);
     } else if (outcome.ok && project.clickTarget === "orca") {
       switchToOrcaTab(project, options?.sessionId);
     }
