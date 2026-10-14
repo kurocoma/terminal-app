@@ -99,6 +99,7 @@ import {
   launchInOrca,
   openChangedInOrca,
   registerInOrca,
+  setOrcaProjectPaths,
   orcaSleepingPathSet,
   orcaWorktreePathSet,
   readOrcaScreen,
@@ -1091,7 +1092,9 @@ function refreshOrcaPaths(windows: readonly TopLevelWindow[]): void {
       } else if (Date.now() - orcaAgentsAt > 30_000) {
         setOrcaAgents(new Map(), new Map());
       }
-      const next = worktrees === null ? null : orcaWorktreePathSet(worktrees);
+      const projectPaths = projectStore.projects.map((p) => p.path);
+      setOrcaProjectPaths(projectPaths);
+      const next = worktrees === null ? null : orcaWorktreePathSet(worktrees, projectPaths);
       if (worktrees === null && !orcaFetchFailed) logger.warn("Orca のフォルダ一覧を取得できません（Orca 対象のタイルは窓の有無だけで判定）");
       if (worktrees !== null && orcaFetchFailed) logger.info("Orca のフォルダ一覧の取得が回復しました");
       orcaFetchFailed = worktrees === null;
@@ -1103,7 +1106,7 @@ function refreshOrcaPaths(windows: readonly TopLevelWindow[]): void {
       if (changed) pollWindowPresence(); // orcaFetching 中のため再取得はしない
       // スリープ中のフォルダ（261005_4）。取得失敗のときは前回値を保つ
       if (worktrees !== null) {
-        const sleeping = orcaSleepingPathSet(worktrees);
+        const sleeping = orcaSleepingPathSet(worktrees, projectPaths);
         const sleepChanged = sleeping.size !== orcaSleepingPaths.size || [...sleeping].some((p) => !orcaSleepingPaths.has(p));
         orcaSleepingPaths = sleeping;
         if (sleepChanged) broadcast();
@@ -1264,7 +1267,9 @@ function switchToOrcaTab(project: Project, sessionId?: string): void {
       // クリックは「繋がっている Orca のタブへ移る」だけ。ターミナルは作らない（261015_4。仕様 261005_1 に戻す）。
       // 繋がっていないフォルダは右クリックで繋げる（「Orca に登録」/「立ち上げる」）
       if (!r.ok && r.noTerminal === true) {
-        setStatus(`${project.name} は Orca に繋がっていません。右クリック →「Orca に登録」で繋げられます`);
+        setStatus(r.connected === true
+          ? `${project.name} のこのセッションは Orca にターミナルがありません（Orca で閉じられた可能性があります）`
+          : `${project.name} は Orca に繋がっていません。右クリック →「Orca に登録」で繋げられます`);
         return;
       }
       if (!r.ok && r.message !== undefined) setStatus(r.message);

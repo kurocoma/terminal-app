@@ -193,8 +193,40 @@ export function parseWorktrees(result: unknown): OrcaWorktree[] {
  * （クリックしても切り替え先のタブが無い = 「立ち上げる」で作るべき状態のため）。
  * liveTerminalCount を返さない版はフォルダがあるだけで含める
  */
-export function orcaWorktreePathSet(worktrees: readonly OrcaWorktree[]): Set<string> {
-  return new Set(worktrees.filter((w) => w.liveTerminals === undefined || w.liveTerminals > 0).map((w) => normalizePath(w.path)));
+export function orcaWorktreePathSet(worktrees: readonly OrcaWorktree[], projectPaths?: readonly string[]): Set<string> {
+  const out = new Set<string>();
+  for (const w of worktrees) {
+    if (w.liveTerminals !== undefined && w.liveTerminals === 0) continue;
+    const key = projectPaths === undefined ? normalizePath(w.path) : ownerProjectPath(w.path, projectPaths);
+    if (key !== null) out.add(key);
+  }
+  return out;
+}
+
+/**
+ * Orca の作業台フォルダ → terminal-app のプロジェクト（正規化済みパス）。261015_5。
+ * セッションの cwd と同じく「最長一致のプレフィックス」で割り当てる（design.md 4.7。サブフォルダは親プロジェクト）。
+ * 例: Orca が pad-python\portal_tool を登録し、terminal-app が pad-python を登録している場合は pad-python に属する
+ */
+export function ownerProjectPath(candidate: string, projectPaths: readonly string[]): string | null {
+  const c = normalizePath(candidate);
+  let best: string | null = null;
+  for (const p of projectPaths) {
+    const pN = normalizePath(p);
+    if ((c === pN || c.startsWith(pN + "\\")) && (best === null || pN.length > best.length)) best = pN;
+  }
+  return best;
+}
+
+/** candidate（Orca の作業台フォルダ）が projectPath のプロジェクトに属するか。projectPaths は登録済みの全プロジェクト */
+export function belongsToProject(candidate: string, projectPath: string, projectPaths: readonly string[]): boolean {
+  return ownerProjectPath(candidate, [...projectPaths, projectPath]) === normalizePath(projectPath);
+}
+
+/** terminal-app に登録済みのプロジェクトのパス（作業台 → プロジェクトの割り当てに使う。index.ts が更新する） */
+let knownProjectPaths: readonly string[] = [];
+export function setOrcaProjectPaths(paths: readonly string[]): void {
+  knownProjectPaths = [...paths];
 }
 
 /**
@@ -202,8 +234,19 @@ export function orcaWorktreePathSet(worktrees: readonly OrcaWorktree[]): Set<str
  * そのワークスペースのターミナルを全部閉じる操作のため、「登録済みで生きているターミナルが 0」をスリープ中とみなす。
  * liveTerminalCount を返さない版は判定できないので含めない
  */
-export function orcaSleepingPathSet(worktrees: readonly OrcaWorktree[]): Set<string> {
-  return new Set(worktrees.filter((w) => w.liveTerminals === 0).map((w) => normalizePath(w.path)));
+export function orcaSleepingPathSet(worktrees: readonly OrcaWorktree[], projectPaths?: readonly string[]): Set<string> {
+  // 同じフォルダ（またはプロジェクト）に作業台が複数あるとき、1 つでもターミナルが生きていればスリープではない（261015_5。
+  // dev のように Orca のフォルダ作業台が 4 つあり、1 つだけ動いているケースでスリープと誤判定していた）
+  const keyOf = (w: OrcaWorktree): string | null => (projectPaths === undefined ? normalizePath(w.path) : ownerProjectPath(w.path, projectPaths));
+  const awake = new Set<string>();
+  const zero = new Set<string>();
+  for (const w of worktrees) {
+    const key = keyOf(w);
+    if (key === null) continue;
+    if (w.liveTerminals === 0) zero.add(key);
+    else awake.add(key);
+  }
+  return new Set([...zero].filter((k) => !awake.has(k)));
 }
 
 /**
@@ -319,16 +362,23 @@ export function pickOrcaTerminal(input: {
   paneBySession: ReadonlyMap<string, string>;
   projectPath: string;
   hint?: OrcaSessionHint;
+  /** 登録済みの全プロジェクトのパス（省略時は setOrcaProjectPaths の値） */
+  projectPaths?: readonly string[];
 }): OrcaTerminal | null {
   const { terminals, worktrees, paneBySession, projectPath, hint } = input;
   const exact = findExactTerminal(terminals, paneBySession, hint?.sessionId);
   if (exact !== null) return exact;
-  const projN = normalizePath(projectPath);
-  const folderWorktrees = worktrees.filter((w) => normalizePath(w.path) === projN);
+  // サブフォルダの作業台もプロジェクトに含める（261015_5。最長一致でより深い登録プロジェクトのものは除く）
+  const owns = (p: string): boolean => belongsToProject(p, projectPath, input.projectPaths ?? knownProjectPaths);
+  const folderWorktrees = worktrees.filter((w) => owns(w.path));
   // git 管理外のフォルダ（folder-workspace）はターミナル側の worktreePath が空のため worktreeId でも照合する
   const folderIds = new Set(folderWorktrees.flatMap((w) => (w.worktreeId !== undefined ? [w.worktreeId] : [])));
+  // 別のセッションのものと分かっているターミナルには切り替えない（261015_5。同じフォルダで複数セッションが
+  // 動いているとき、Orca で閉じたセッションのタイルを押すと隣のセッションのタブへ飛んでいた）
+  const otherPanes = hint?.sessionId !== undefined ? new Set(paneBySession.values()) : new Set<string>();
   const inFolder = terminals.filter((t) =>
-    (t.worktreePath !== "" && normalizePath(t.worktreePath) === projN) || (t.worktreeId !== undefined && folderIds.has(t.worktreeId)));
+    ((t.worktreePath !== "" && owns(t.worktreePath)) || (t.worktreeId !== undefined && folderIds.has(t.worktreeId))) &&
+    !otherPanes.has(paneOf(t)));
   if (inFolder.length === 0) return null;
   const agents = folderWorktrees.flatMap((w) => w.agents);
   const provider = hint?.provider ?? "claude";
@@ -375,22 +425,27 @@ export async function switchOrcaTerminal(
   hint?: OrcaSessionHint,
   /** 後から別のタイルが押されたら false（古い要求で最後の選択を上書きしない） */
   isCurrent: () => boolean = () => true,
-): Promise<OrcaOutcome & { superseded?: boolean; noTerminal?: boolean }> {
+): Promise<OrcaOutcome & { superseded?: boolean; noTerminal?: boolean; connected?: boolean }> {
   const [terms, wts] = await Promise.all([
     runOrcaCli(["terminal", "list", "--limit", LIST_LIMIT]),
     runOrcaCli(["worktree", "ps", "--limit", LIST_LIMIT]),
   ]);
   if (!isCurrent()) return { ok: false, superseded: true };
   if (!terms.ok) return { ok: false, message: terms.message };
+  const worktrees = wts.ok ? parseWorktrees(wts.result) : [];
   const target = pickOrcaTerminal({
     terminals: parseTerminals(terms.result),
-    worktrees: wts.ok ? parseWorktrees(wts.result) : [],
+    worktrees,
     paneBySession: readPaneKeysBySession(),
     projectPath,
     hint,
   });
   // noTerminal: フォルダ未登録かターミナル 0 本。呼び出し側はこのときだけ「立ち上げる」に切り替える（261013_1）
-  if (target === null) return { ok: false, noTerminal: true, message: "Orca にこのフォルダのターミナルがありません" };
+  if (target === null) {
+    // connected: フォルダ自体は Orca にある（このセッションのターミナルだけが無い）
+    const connected = worktrees.some((w) => belongsToProject(w.path, projectPath, knownProjectPaths));
+    return { ok: false, noTerminal: true, connected, message: "Orca にこのフォルダのターミナルがありません" };
+  }
   const r = await runOrcaCli(["terminal", "switch", "--terminal", target.handle]);
   return r.ok ? { ok: true } : { ok: false, message: r.message };
 }
@@ -461,7 +516,8 @@ export async function registerInOrca(projectPath: string, options: { initGit: bo
   const listed = async (): Promise<boolean | null> => {
     const [r, wts] = await Promise.all([runOrcaCli(["repo", "list"]), fetchOrcaWorktrees()]);
     const key = normalizePath(projectPath);
-    if (wts !== null && wts.some((w) => normalizePath(w.path) === key)) return true;
+    // サブフォルダが Orca にあれば繋がっている（例: pad-python\portal_tool。261015_5）
+    if (wts !== null && wts.some((w) => belongsToProject(w.path, projectPath, knownProjectPaths))) return true;
     return r.ok ? parseRepoPaths(r.result).has(key) : null;
   };
   if ((await listed()) === true) return { ok: true, already: true };
@@ -511,8 +567,11 @@ export async function launchInOrca(projectPath: string): Promise<OrcaOutcome> {
 export function pickWorktreeSelector(worktrees: readonly OrcaWorktree[] | null, projectPath: string): string | null {
   if (worktrees === null) return null;
   const key = normalizePath(projectPath);
-  const same = worktrees.filter((w) => w.worktreeId !== undefined && normalizePath(w.path) === key);
-  const chosen = same.find((w) => (w.liveTerminals ?? 0) > 0) ?? same[0];
+  const same = worktrees.filter((w) => w.worktreeId !== undefined && belongsToProject(w.path, projectPath, knownProjectPaths));
+  // 同じフォルダを優先し、その中でターミナルが生きているもの
+  const exact = same.filter((w) => normalizePath(w.path) === key);
+  const pool = exact.length > 0 ? exact : same;
+  const chosen = pool.find((w) => (w.liveTerminals ?? 0) > 0) ?? pool[0];
   return chosen?.worktreeId !== undefined ? `id:${chosen.worktreeId}` : null;
 }
 
