@@ -1167,11 +1167,15 @@ async function registerProjectInOrca(id: string): Promise<void> {
   setStatus(`${project.name} を Orca に登録しています…`);
   let r = await registerInOrca(project.path, { initGit: false });
   if (!r.ok && r.needsGit === true && !win.isDestroyed()) {
+    // 直下に git リポジトリがあるフォルダ（例: dev 全体）を git init すると、配下のリポジトリを 1 つの木に包んでしまう
+    const gitChildren = countGitChildren(project.path);
     const { response } = await dialog.showMessageBox(win, {
-      type: "question",
+      type: gitChildren > 0 ? "warning" : "question",
       title: "Orca に登録",
       message: `${project.name} は git 管理外です。git init してから Orca に登録しますか？`,
-      detail: `${project.path} に .git フォルダを作ります（ファイルは変更しません）。Orca の CLI は git 管理のフォルダしか登録できないためです。`,
+      detail:
+        `${project.path} に .git フォルダを作ります（ファイルは変更しません）。Orca の CLI は git 管理のフォルダしか登録できないためです。` +
+        (gitChildren > 0 ? `\n\n注意: このフォルダの直下に git リポジトリが ${gitChildren} 件あります。親を git init すると配下のリポジトリを包む形になるため、通常はおすすめしません。` : ""),
       buttons: ["git init して登録", "やめる"],
       defaultId: 0,
       cancelId: 1,
@@ -1184,8 +1188,20 @@ async function registerProjectInOrca(id: string): Promise<void> {
     r = await registerInOrca(project.path, { initGit: true });
   }
   logger.info(`Orca 登録 ${r.ok ? "成功" : "失敗"}: ${project.name}${r.already === true ? "（登録済み）" : ""}${r.message ? ` (${r.message})` : ""}`);
-  setStatus(r.ok ? `${project.name} を Orca に登録しました。タイルをクリックするとターミナルを開きます` : (r.message ?? "Orca への登録に失敗しました"));
+  // 登録直後はターミナルが 0 本 = Orca の一覧上は「スリープ中」になる。開くのは「起こす」（261005_4 の設計のまま）
+  setStatus(r.ok ? `${project.name} を Orca に登録しました。右クリック →「起こす」でターミナルを開きます` : (r.message ?? "Orca への登録に失敗しました"));
   pollWindowPresence();
+}
+
+/** 直下のサブフォルダのうち git リポジトリの数（git init の注意喚起用。読めなければ 0） */
+function countGitChildren(dir: string): number {
+  try {
+    return fs.readdirSync(dir, { withFileTypes: true })
+      .filter((d) => d.isDirectory() && fs.existsSync(path.join(dir, d.name, ".git")))
+      .length;
+  } catch {
+    return 0;
+  }
 }
 
 /** 指示の履歴（261005_3）。Codex は保存先を順に試し、Claude は記録済みの transcript（無ければ探索）を読む */

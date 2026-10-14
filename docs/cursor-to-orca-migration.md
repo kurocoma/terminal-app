@@ -146,7 +146,7 @@ npx vitest run tests/orca.test.ts tests/orca-interact.test.ts tests/codex-monito
 | 項目 | 内容 |
 |---|---|
 | クリック | Orca にターミナルが無いフォルダは、クリックだけで「立ち上げる」と同じ手順（登録 → ターミナル作成）に進む（261013_1） |
-| 右クリック「Orca に登録」 | 登録だけ行う。登録済みなら「Orca に登録済み」で押せない（261015_1） |
+| 右クリック「Orca に登録」 | 登録だけ行う。登録済みなら「Orca に登録済み」で押せない（261015_1）。登録直後はターミナル 0 本＝スリープ中の表示になるので、開くのは右クリック「起こす」 |
 | git 管理外のフォルダ | Orca の CLI `repo add` は git 管理のフォルダしか受け付けない（`Not a valid git repository`）。画面の「フォルダを追加」に相当する CLI は無い（`project setup-existing-folder --kind folder` は既存プロジェクト ID が必須。1.4.220 で確認） |
 | 対処 | 右クリック「Orca に登録」で確認ダイアログを出し、許可されたら `git init`（.git フォルダを作るだけ）→ `repo add`。クリック時の自動登録では git init しない |
 | 裏取り | 登録の成否は CLI の戻り値だけでなく、直後の `repo list` にフォルダがあるかで判定する |

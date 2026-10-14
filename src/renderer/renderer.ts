@@ -81,7 +81,7 @@ const TARGET_LABEL: Record<ClickTarget, string> = { cursor: "Cursor", orca: "Orc
 
 const UNLINKED_HINT: Record<ClickTarget, string> = {
   cursor: "Cursor でこのフォルダを開いているウィンドウが見つかりません。右クリック →「立ち上げる」で開けます",
-  orca: "Orca でこのフォルダが開かれていません（Orca が起動していないか、ワークスペースに無い）。クリックすると Orca に登録してターミナルを開きます",
+  orca: "Orca でこのフォルダが開かれていません（Orca が起動していないか、ワークスペースに無い）。クリックすると Orca に登録してターミナルを開きます（git 管理外は右クリック →「Orca に登録」）",
   terminal: "このフォルダを開いているターミナルのウィンドウが見つかりません。右クリック →「立ち上げる」で開けます",
 };
 
