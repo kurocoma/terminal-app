@@ -98,6 +98,8 @@ import {
   fetchOrcaWorktrees,
   launchInOrca,
   openChangedInOrca,
+  registerInOrca,
+  setOrcaProjectPaths,
   orcaSleepingPathSet,
   orcaWorktreePathSet,
   readOrcaScreen,
@@ -1090,7 +1092,9 @@ function refreshOrcaPaths(windows: readonly TopLevelWindow[]): void {
       } else if (Date.now() - orcaAgentsAt > 30_000) {
         setOrcaAgents(new Map(), new Map());
       }
-      const next = worktrees === null ? null : orcaWorktreePathSet(worktrees);
+      const projectPaths = projectStore.projects.map((p) => p.path);
+      setOrcaProjectPaths(projectPaths);
+      const next = worktrees === null ? null : orcaWorktreePathSet(worktrees, projectPaths);
       if (worktrees === null && !orcaFetchFailed) logger.warn("Orca のフォルダ一覧を取得できません（Orca 対象のタイルは窓の有無だけで判定）");
       if (worktrees !== null && orcaFetchFailed) logger.info("Orca のフォルダ一覧の取得が回復しました");
       orcaFetchFailed = worktrees === null;
@@ -1102,7 +1106,7 @@ function refreshOrcaPaths(windows: readonly TopLevelWindow[]): void {
       if (changed) pollWindowPresence(); // orcaFetching 中のため再取得はしない
       // スリープ中のフォルダ（261005_4）。取得失敗のときは前回値を保つ
       if (worktrees !== null) {
-        const sleeping = orcaSleepingPathSet(worktrees);
+        const sleeping = orcaSleepingPathSet(worktrees, projectPaths);
         const sleepChanged = sleeping.size !== orcaSleepingPaths.size || [...sleeping].some((p) => !orcaSleepingPaths.has(p));
         orcaSleepingPaths = sleeping;
         if (sleepChanged) broadcast();
@@ -1129,7 +1133,15 @@ function setOrcaAgents(agents: Map<string, OrcaAgent>, paneBySession: Map<string
 /** 右クリックメニューの Orca 専用項目（261005_2）。Orca 対象のプロジェクトだけに出す */
 function orcaMenuItems(project: Project, sessionId: string | undefined): MenuItemConstructorOptions[] {
   if (project.clickTarget !== "orca") return [];
+  // Orca に登録（261015_1）: 一覧で登録済みと分かるときだけ無効化（Orca が閉じていて一覧が無いときは押せる）
+  const key = normalizePath(project.path);
+  const registered = orcaPaths?.has(key) === true || orcaSleepingPaths.has(key);
   return [
+    {
+      label: registered ? "Orca に登録済み" : "Orca に登録（フォルダを追加）",
+      enabled: !registered,
+      click: () => { void registerProjectInOrca(project.id); },
+    },
     {
       label: "Orca: 画面を見て返信…",
       click: () => { win?.webContents.send("orca-panel-request", project.id, sessionId ?? null); },
@@ -1146,6 +1158,53 @@ function orcaMenuItems(project: Project, sessionId: string | undefined): MenuIte
       },
     },
   ];
+}
+
+/**
+ * Orca に登録（261015_1）。git 管理外のフォルダは Orca の CLI が受け付けないため、
+ * ユーザーに確認してから git init → 登録する（.git フォルダができる）
+ */
+async function registerProjectInOrca(id: string): Promise<void> {
+  const project = projectStore.getProject(id);
+  if (project === null || win === null) return;
+  setStatus(`${project.name} を Orca に登録しています…`);
+  let r = await registerInOrca(project.path, { initGit: false });
+  if (!r.ok && r.needsGit === true && !win.isDestroyed()) {
+    // 直下に git リポジトリがあるフォルダ（例: dev 全体）を git init すると、配下のリポジトリを 1 つの木に包んでしまう
+    const gitChildren = countGitChildren(project.path);
+    const { response } = await dialog.showMessageBox(win, {
+      type: gitChildren > 0 ? "warning" : "question",
+      title: "Orca に登録",
+      message: `${project.name} は git 管理外です。git init してから Orca に登録しますか？`,
+      detail:
+        `${project.path} に .git フォルダを作ります（ファイルは変更しません）。Orca の CLI は git 管理のフォルダしか登録できないためです。` +
+        (gitChildren > 0 ? `\n\n注意: このフォルダの直下に git リポジトリが ${gitChildren} 件あります。親を git init すると配下のリポジトリを包む形になるため、通常はおすすめしません。` : ""),
+      buttons: ["git init して登録", "やめる"],
+      defaultId: 0,
+      cancelId: 1,
+      noLink: true,
+    });
+    if (response !== 0) {
+      setStatus("Orca への登録をやめました");
+      return;
+    }
+    r = await registerInOrca(project.path, { initGit: true });
+  }
+  logger.info(`Orca 登録 ${r.ok ? "成功" : "失敗"}: ${project.name}${r.already === true ? "（登録済み）" : ""}${r.message ? ` (${r.message})` : ""}`);
+  // 登録直後はターミナルが 0 本 = Orca の一覧上は「スリープ中」になる。開くのは「起こす」（261005_4 の設計のまま）
+  setStatus(r.ok ? `${project.name} を Orca に登録しました。ターミナルは右クリック →「起こす」で開けます` : (r.message ?? "Orca への登録に失敗しました"));
+  pollWindowPresence();
+}
+
+/** 直下のサブフォルダのうち git リポジトリの数（git init の注意喚起用。読めなければ 0） */
+function countGitChildren(dir: string): number {
+  try {
+    return fs.readdirSync(dir, { withFileTypes: true })
+      .filter((d) => d.isDirectory() && fs.existsSync(path.join(dir, d.name, ".git")))
+      .length;
+  } catch {
+    return 0;
+  }
 }
 
 /** 指示の履歴（261005_3）。Codex は保存先を順に試し、Claude は記録済みの transcript（無ければ探索）を読む */
@@ -1205,6 +1264,14 @@ function switchToOrcaTab(project: Project, sessionId?: string): void {
     .then((r) => {
       if (r.superseded === true) return; // 後から押した別のタイルを優先する
       logger.info(`Orca タブ切替 ${r.ok ? "成功" : "失敗"}: ${project.name}${r.message ? ` (${r.message})` : ""}`);
+      // クリックは「繋がっている Orca のタブへ移る」だけ。ターミナルは作らない（261015_4。仕様 261005_1 に戻す）。
+      // 繋がっていないフォルダは右クリックで繋げる（「Orca に登録」/「立ち上げる」）
+      if (!r.ok && r.noTerminal === true) {
+        setStatus(r.connected === true
+          ? `${project.name} のこのセッションは Orca にターミナルがありません（Orca で閉じられた可能性があります）`
+          : `${project.name} は Orca に繋がっていません。右クリック →「Orca に登録」で繋げられます`);
+        return;
+      }
       if (!r.ok && r.message !== undefined) setStatus(r.message);
     });
 }
