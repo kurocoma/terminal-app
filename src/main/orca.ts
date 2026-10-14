@@ -457,9 +457,12 @@ export interface RegisterOutcome extends OrcaOutcome {
 export async function registerInOrca(projectPath: string, options: { initGit: boolean }): Promise<RegisterOutcome> {
   const up = await ensureOrcaRunning();
   if (!up.ok) return up;
+  // 登録済み判定は repo list と worktree ps の両方を見る（git 管理外の「フォルダ作業台」は repo list に出ない）
   const listed = async (): Promise<boolean | null> => {
-    const r = await runOrcaCli(["repo", "list"]);
-    return r.ok ? parseRepoPaths(r.result).has(normalizePath(projectPath)) : null;
+    const [r, wts] = await Promise.all([runOrcaCli(["repo", "list"]), fetchOrcaWorktrees()]);
+    const key = normalizePath(projectPath);
+    if (wts !== null && wts.some((w) => normalizePath(w.path) === key)) return true;
+    return r.ok ? parseRepoPaths(r.result).has(key) : null;
   };
   if ((await listed()) === true) return { ok: true, already: true };
   const plan = registerPlan(fs.existsSync(path.join(projectPath, ".git")), options.initGit);
@@ -485,17 +488,32 @@ export async function registerInOrca(projectPath: string, options: { initGit: bo
  * Orca が閉じていれば `orca open` で起動を待ち、フォルダが Orca 未登録なら登録（registerInOrca）してから作る
  */
 export async function launchInOrca(projectPath: string): Promise<OrcaOutcome> {
-  const selector = `path:${orcaPath(projectPath)}`;
-  const create = (): Promise<CliResult> => runOrcaCli(["terminal", "create", "--worktree", selector, "--focus"], 20_000);
+  const create = (selector: string): Promise<CliResult> =>
+    runOrcaCli(["terminal", "create", "--worktree", selector, "--focus"], 20_000);
   const up = await ensureOrcaRunning();
   if (!up.ok) return up;
-  let r = await create();
+  let r = await create(`path:${orcaPath(projectPath)}`);
+  if (!r.ok && r.code === "selector_not_found") {
+    // path: で見つからない作業台（git 管理外の「フォルダ作業台」など）は worktree ps の ID で指定する（261015_3 実測）。
+    // 同じフォルダに複数あればターミナルが生きているものを優先する
+    const selector = pickWorktreeSelector(await fetchOrcaWorktrees(), projectPath);
+    if (selector !== null) r = await create(selector);
+  }
   if (!r.ok && r.code === "selector_not_found") {
     const added = await registerInOrca(projectPath, { initGit: false }); // 勝手に git init はしない
     if (!added.ok) return added;
-    r = await create();
+    r = await create(`path:${orcaPath(projectPath)}`);
   }
   return r.ok ? { ok: true } : { ok: false, message: `Orca でターミナルを開けませんでした（${r.code}）` };
+}
+
+/** 同じフォルダの作業台から `id:<worktreeId>` の選択子を 1 つ選ぶ（ターミナルが生きているものを優先）。無ければ null */
+export function pickWorktreeSelector(worktrees: readonly OrcaWorktree[] | null, projectPath: string): string | null {
+  if (worktrees === null) return null;
+  const key = normalizePath(projectPath);
+  const same = worktrees.filter((w) => w.worktreeId !== undefined && normalizePath(w.path) === key);
+  const chosen = same.find((w) => (w.liveTerminals ?? 0) > 0) ?? same[0];
+  return chosen?.worktreeId !== undefined ? `id:${chosen.worktreeId}` : null;
 }
 
 /* ---------------- 画面プレビュー・返信・中断・承認待ち（261005_2） ---------------- */

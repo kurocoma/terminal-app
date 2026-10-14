@@ -1189,7 +1189,7 @@ async function registerProjectInOrca(id: string): Promise<void> {
   }
   logger.info(`Orca 登録 ${r.ok ? "成功" : "失敗"}: ${project.name}${r.already === true ? "（登録済み）" : ""}${r.message ? ` (${r.message})` : ""}`);
   // 登録直後はターミナルが 0 本 = Orca の一覧上は「スリープ中」になる。開くのは「起こす」（261005_4 の設計のまま）
-  setStatus(r.ok ? `${project.name} を Orca に登録しました。右クリック →「起こす」でターミナルを開きます` : (r.message ?? "Orca への登録に失敗しました"));
+  setStatus(r.ok ? `${project.name} を Orca に登録しました。タイルをクリックするとターミナルを開きます` : (r.message ?? "Orca への登録に失敗しました"));
   pollWindowPresence();
 }
 
@@ -2040,9 +2040,10 @@ function wireIpc(): void {
     logger.info(`前面化 ${outcome.ok ? "成功" : "失敗"}: ${project.name} → ${project.clickTarget}${viaTouch ? "（タッチ: ポインター移動）" : ""}${outcome.message ? ` (${outcome.message})` : ""}`);
     setStatus(outcome.ok ? "" : (outcome.message ?? "前面化に失敗しました"));
     // Orca は窓が 1 枚のため、前面化の後に押したセッションのタブへ切り替える（261005_1）。
-    // スリープ中は切り替え先のターミナルが無い。起こすのは右クリックの「起こす」（ターミナルを作る）に任せる（261005_4）
+    // スリープ中（ターミナル 0 本）は切り替え先が無いので、クリックで起こす（ターミナルを作る。261015_3。
+    // 261005_4 では右クリック「起こす」だけにしていたが、「クリックしても開かない」と見えるため変更）
     if (outcome.ok && isOrcaSleeping(project)) {
-      setStatus(`${project.name} は Orca でスリープ中です。起こすときはタイル右クリック →「起こす」`);
+      launchProject(id);
     } else if (outcome.ok && project.clickTarget === "orca") {
       switchToOrcaTab(project, options?.sessionId);
     }
