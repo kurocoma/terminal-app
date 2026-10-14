@@ -84,3 +84,14 @@ describe("別セッションのタブへ飛ばない", () => {
     expect(pick()).toBe("t-b");
   });
 });
+
+describe("ジャンクション越しのフォルダ（261015_6）", () => {
+  // dev/zaico-kanri-app は dev/tana2/zaico-kanri-app へのジャンクション。Orca は実体のパスで作業台を返す
+  const resolve = (p: string): string => p.replace(/zaico-kanri-app$/i, "tana2/zaico-kanri-app").replace(/\/dev\/tana2\/tana2\//i, "/dev/tana2/");
+  const ps = ["C:/u/dev", "C:/u/dev/zaico-kanri-app"];
+
+  it("実体のパスの作業台を、ジャンクション側の登録プロジェクトに割り当てる", () => {
+    expect(ownerProjectPath("C:/u/dev/tana2/zaico-kanri-app", ps, resolve)).toBe(key("C:/u/dev/zaico-kanri-app"));
+    expect(ownerProjectPath("C:/u/dev/tana2/other", ps, resolve)).toBe(key("C:/u/dev"));
+  });
+});

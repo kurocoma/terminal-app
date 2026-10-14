@@ -208,14 +208,40 @@ export function orcaWorktreePathSet(worktrees: readonly OrcaWorktree[], projectP
  * セッションの cwd と同じく「最長一致のプレフィックス」で割り当てる（design.md 4.7。サブフォルダは親プロジェクト）。
  * 例: Orca が pad-python\portal_tool を登録し、terminal-app が pad-python を登録している場合は pad-python に属する
  */
-export function ownerProjectPath(candidate: string, projectPaths: readonly string[]): string | null {
-  const c = normalizePath(candidate);
+export function ownerProjectPath(
+  candidate: string,
+  projectPaths: readonly string[],
+  resolve: (p: string) => string = realPathOf,
+): string | null {
+  // ジャンクション越しのフォルダ（例: dev\\zaico-kanri-app → dev\\tana2\\zaico-kanri-app）は実体のパスで比べる（261015_6）。
+  // 戻り値はプロジェクトの登録パス（正規化済み）
+  const c = normalizePath(resolve(candidate));
   let best: string | null = null;
+  let bestLen = -1;
   for (const p of projectPaths) {
-    const pN = normalizePath(p);
-    if ((c === pN || c.startsWith(pN + "\\")) && (best === null || pN.length > best.length)) best = pN;
+    const pR = normalizePath(resolve(p));
+    if ((c === pR || c.startsWith(pR + "\\")) && pR.length > bestLen) {
+      best = normalizePath(p);
+      bestLen = pR.length;
+    }
   }
   return best;
+}
+
+/** 実体のパス（ジャンクション・シンボリックリンクを解決）。解決できなければそのまま。結果は 60 秒キャッシュ */
+const realPathCache = new Map<string, { at: number; real: string }>();
+export function realPathOf(p: string): string {
+  const now = Date.now();
+  const hit = realPathCache.get(p);
+  if (hit !== undefined && now - hit.at < 60_000) return hit.real;
+  let real = p;
+  try {
+    real = fs.realpathSync.native(p);
+  } catch {
+    // 存在しない・権限なし: そのまま比べる
+  }
+  realPathCache.set(p, { at: now, real });
+  return real;
 }
 
 /** candidate（Orca の作業台フォルダ）が projectPath のプロジェクトに属するか。projectPaths は登録済みの全プロジェクト */
@@ -512,13 +538,14 @@ export interface RegisterOutcome extends OrcaOutcome {
 export async function registerInOrca(projectPath: string, options: { initGit: boolean }): Promise<RegisterOutcome> {
   const up = await ensureOrcaRunning();
   if (!up.ok) return up;
-  // 登録済み判定は repo list と worktree ps の両方を見る（git 管理外の「フォルダ作業台」は repo list に出ない）
+  // 繋がっているかは worktree ps（作業台）で判定する。サブフォルダの作業台も含む（例: pad-python\portal_tool。261015_5）。
+  // repo list に載っていても作業台が 0 なら繋がっていない（ジャンクション越しに登録した repo は作業台が出ない。261015_6）。
+  // worktree ps が取れないときだけ repo list で代用する
   const listed = async (): Promise<boolean | null> => {
-    const [r, wts] = await Promise.all([runOrcaCli(["repo", "list"]), fetchOrcaWorktrees()]);
-    const key = normalizePath(projectPath);
-    // サブフォルダが Orca にあれば繋がっている（例: pad-python\portal_tool。261015_5）
-    if (wts !== null && wts.some((w) => belongsToProject(w.path, projectPath, knownProjectPaths))) return true;
-    return r.ok ? parseRepoPaths(r.result).has(key) : null;
+    const wts = await fetchOrcaWorktrees();
+    if (wts !== null) return wts.some((w) => belongsToProject(w.path, projectPath, knownProjectPaths));
+    const r = await runOrcaCli(["repo", "list"]);
+    return r.ok ? parseRepoPaths(r.result).has(normalizePath(projectPath)) : null;
   };
   if ((await listed()) === true) return { ok: true, already: true };
   const plan = registerPlan(fs.existsSync(path.join(projectPath, ".git")), options.initGit);
@@ -533,9 +560,10 @@ export async function registerInOrca(projectPath: string, options: { initGit: bo
     const init = await gitInit(projectPath);
     if (!init.ok) return init;
   }
-  const added = await runOrcaCli(["repo", "add", "--path", projectPath], 20_000);
+  // ジャンクションは実体のパスで登録する（git が実体のパスで作業台を返すため、そうしないと Orca に作業台が出ない。261015_6）
+  const added = await runOrcaCli(["repo", "add", "--path", realPathOf(projectPath)], 20_000);
   if (!added.ok) return { ok: false, message: `Orca にこのフォルダを追加できませんでした（${added.code}）` };
-  if ((await listed()) === false) return { ok: false, message: "Orca に登録したはずのフォルダが一覧にありません" };
+  if ((await listed()) === false) return { ok: false, message: "Orca に登録したはずのフォルダが一覧にありません（作業台が出ていません）" };
   return { ok: true };
 }
 
@@ -566,10 +594,9 @@ export async function launchInOrca(projectPath: string): Promise<OrcaOutcome> {
 /** 同じフォルダの作業台から `id:<worktreeId>` の選択子を 1 つ選ぶ（ターミナルが生きているものを優先）。無ければ null */
 export function pickWorktreeSelector(worktrees: readonly OrcaWorktree[] | null, projectPath: string): string | null {
   if (worktrees === null) return null;
-  const key = normalizePath(projectPath);
   const same = worktrees.filter((w) => w.worktreeId !== undefined && belongsToProject(w.path, projectPath, knownProjectPaths));
   // 同じフォルダを優先し、その中でターミナルが生きているもの
-  const exact = same.filter((w) => normalizePath(w.path) === key);
+  const exact = same.filter((w) => normalizePath(realPathOf(w.path)) === normalizePath(realPathOf(projectPath)));
   const pool = exact.length > 0 ? exact : same;
   const chosen = pool.find((w) => (w.liveTerminals ?? 0) > 0) ?? pool[0];
   return chosen?.worktreeId !== undefined ? `id:${chosen.worktreeId}` : null;

@@ -149,7 +149,7 @@ npx vitest run tests/orca.test.ts tests/orca-interact.test.ts tests/codex-monito
 | 作業台とタイルの対応 | Orca の作業台は、セッションの cwd と同じ「最長一致のプレフィックス」でタイルに割り当てる。Orca がサブフォルダ（例: pad-python/portal_tool）を登録していても親のタイルに繋がる。同じフォルダに作業台が複数あれば、1 つでもターミナルが動いていればスリープではない（261015_5。dev のフォルダ作業台 4 つのうち 3 つが 0 本でスリープと誤判定していた） |
 | 別セッションのタブへ飛ばない | 押したセッションのターミナルが Orca に無いとき、他のセッションのものと分かっているタブは選ばない。「このセッションは Orca にターミナルがありません」と案内する（261015_5） |
 | フォルダ作業台 | git 管理外のフォルダを Orca の画面で追加した「フォルダ作業台」は `path:` の選択子で見つからない。`worktree ps` の ID（`id:folder:…`）で指定する。登録済み判定も `repo list` と `worktree ps` の両方で行う（261015_3） |
-| 作業台が消えた repo | `repo list` にはあるが `worktree ps` に無い repo（例: 2026-10-15 の zaico-kanri-app）は、CLI ではターミナルを作れない（`repo add` を再実行しても戻らない）。Orca の画面でそのプロジェクトを開き直す |
+| ジャンクション | `repo list` にはあるが `worktree ps` に作業台が無い repo の原因は、ジャンクション（例: dev/zaico-kanri-app → dev/tana2/zaico-kanri-app）越しの登録だった。git は実体のパスで作業台を返すため、Orca が repo と作業台を結び付けられない。パスの比較は実体で行い、右クリック「Orca に登録」は実体のパスで `repo add` する。作業台が 0 の repo は「繋がっていない」とみなす（261015_6） |
 | 右クリック「Orca に登録」 | 繋がっていないフォルダを Orca に登録する（ターミナルは作らない）。登録済みなら「Orca に登録済み」で押せない（261015_1）。登録直後はターミナル 0 本＝スリープ中の表示になる |
 | git 管理外のフォルダ | Orca の CLI `repo add` は git 管理のフォルダしか受け付けない（`Not a valid git repository`）。画面の「フォルダを追加」に相当する CLI は無い（`project setup-existing-folder --kind folder` は既存プロジェクト ID が必須。1.4.220 で確認） |
 | 対処 | 右クリック「Orca に登録」で確認ダイアログを出し、許可されたら `git init`（.git フォルダを作るだけ）→ `repo add`。右クリック「立ち上げる」からの自動登録では git init しない |
