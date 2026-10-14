@@ -400,29 +400,99 @@ function orcaPath(projectPath: string): string {
   return projectPath.replace(/\\/g, "/").replace(/\/+$/, "");
 }
 
+/** `repo list` の結果から、Orca に登録済みのフォルダ（正規化済み）を取り出す */
+export function parseRepoPaths(result: unknown): Set<string> {
+  const list = rec(result)?.repos;
+  if (!Array.isArray(list)) return new Set();
+  const out = new Set<string>();
+  for (const item of list) {
+    const p = str(rec(item)?.path);
+    if (p !== undefined) out.add(normalizePath(p));
+  }
+  return out;
+}
+
+/**
+ * 登録の手順（261015_1。純関数）。
+ * Orca の CLI `repo add` は git 管理のフォルダ限定（"Not a valid git repository" で拒否。
+ * 画面の「フォルダを追加」に相当する CLI は無い。`project setup-existing-folder --kind folder` も
+ * 既存プロジェクト ID が必須で、新規フォルダには使えないことを 1.4.220 で確認）。
+ * git 管理外は `git init` してから登録するしかないため、ユーザーが許可したときだけ init する
+ */
+export type RegisterPlan = "add" | "needs-git" | "init-then-add";
+export function registerPlan(isGit: boolean, initGit: boolean): RegisterPlan {
+  if (isGit) return "add";
+  return initGit ? "init-then-add" : "needs-git";
+}
+
+/** Orca の runtime が応答するまで待つ（閉じていれば `orca open` で起動） */
+async function ensureOrcaRunning(): Promise<OrcaOutcome> {
+  const status = await runOrcaCli(["status"]);
+  const running = status.ok && rec(rec(status.result)?.runtime)?.reachable === true;
+  if (running) return { ok: true };
+  const opened = await runOrcaCli(["open"], OPEN_TIMEOUT_MS);
+  return opened.ok ? { ok: true } : { ok: false, message: `Orca を起動できませんでした（${opened.code}）` };
+}
+
+/** `git init`（空リポジトリでも Orca は登録できる。1.4.220 で確認）。出力は使わない */
+function gitInit(cwd: string): Promise<OrcaOutcome> {
+  return new Promise((resolve) => {
+    execFile("git", ["init"], { cwd, windowsHide: true, timeout: 20_000 }, (err) => {
+      resolve(err ? { ok: false, message: `git init に失敗しました: ${err.message.split(/\r?\n/)[0]}` } : { ok: true });
+    });
+  });
+}
+
+export interface RegisterOutcome extends OrcaOutcome {
+  /** 登録済みだった */
+  already?: boolean;
+  /** git 管理外のため登録していない（呼び出し側が確認を取り、initGit: true で呼び直す） */
+  needsGit?: boolean;
+}
+
+/**
+ * Orca にフォルダを登録する（261015_1。右クリック「Orca に登録」と、立ち上げ時の自動登録の共通処理）。
+ * 登録済みなら何もしない。成否は CLI の戻り値だけでなく、登録後の `repo list` にフォルダがあるかで裏取りする
+ */
+export async function registerInOrca(projectPath: string, options: { initGit: boolean }): Promise<RegisterOutcome> {
+  const up = await ensureOrcaRunning();
+  if (!up.ok) return up;
+  const listed = async (): Promise<boolean | null> => {
+    const r = await runOrcaCli(["repo", "list"]);
+    return r.ok ? parseRepoPaths(r.result).has(normalizePath(projectPath)) : null;
+  };
+  if ((await listed()) === true) return { ok: true, already: true };
+  const plan = registerPlan(fs.existsSync(path.join(projectPath, ".git")), options.initGit);
+  if (plan === "needs-git") {
+    return {
+      ok: false,
+      needsGit: true,
+      message: `${path.basename(projectPath)} は git 管理外のため Orca に登録できません。右クリック →「Orca に登録」で git init してから登録できます`,
+    };
+  }
+  if (plan === "init-then-add") {
+    const init = await gitInit(projectPath);
+    if (!init.ok) return init;
+  }
+  const added = await runOrcaCli(["repo", "add", "--path", projectPath], 20_000);
+  if (!added.ok) return { ok: false, message: `Orca にこのフォルダを追加できませんでした（${added.code}）` };
+  if ((await listed()) === false) return { ok: false, message: "Orca に登録したはずのフォルダが一覧にありません" };
+  return { ok: true };
+}
+
 /**
  * 立ち上げ: このフォルダで Orca のターミナルを作り、そのタブを表示する。
- * Orca が閉じていれば `orca open` で起動を待ち、フォルダが Orca 未登録なら `repo add` してから作る
+ * Orca が閉じていれば `orca open` で起動を待ち、フォルダが Orca 未登録なら登録（registerInOrca）してから作る
  */
 export async function launchInOrca(projectPath: string): Promise<OrcaOutcome> {
   const selector = `path:${orcaPath(projectPath)}`;
   const create = (): Promise<CliResult> => runOrcaCli(["terminal", "create", "--worktree", selector, "--focus"], 20_000);
-  const status = await runOrcaCli(["status"]);
-  const running = status.ok && rec(rec(status.result)?.runtime)?.reachable === true;
-  if (!running) {
-    const opened = await runOrcaCli(["open"], OPEN_TIMEOUT_MS);
-    if (!opened.ok) return { ok: false, message: `Orca を起動できませんでした（${opened.code}）` };
-  }
+  const up = await ensureOrcaRunning();
+  if (!up.ok) return up;
   let r = await create();
   if (!r.ok && r.code === "selector_not_found") {
-    // CLI の repo add は git 管理のフォルダ限定（261013_1 実測: "Not a valid git repository"。
-    // エラー本文は parseCliOutput が落とすので .git の有無で先に判定する）。
-    // git 管理外は Orca の画面から「フォルダを追加」してもらうしかないので、その案内を返す
-    if (!fs.existsSync(path.join(projectPath, ".git"))) {
-      return { ok: false, message: `${path.basename(projectPath)} は git 管理外のため Orca の CLI から登録できません。Orca の画面でフォルダを追加してから、もう一度クリックしてください` };
-    }
-    const added = await runOrcaCli(["repo", "add", "--path", projectPath], 20_000);
-    if (!added.ok) return { ok: false, message: `Orca にこのフォルダを追加できませんでした（${added.code}）` };
+    const added = await registerInOrca(projectPath, { initGit: false }); // 勝手に git init はしない
+    if (!added.ok) return added;
     r = await create();
   }
   return r.ok ? { ok: true } : { ok: false, message: `Orca でターミナルを開けませんでした（${r.code}）` };

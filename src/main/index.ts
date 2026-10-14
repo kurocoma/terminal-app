@@ -98,6 +98,7 @@ import {
   fetchOrcaWorktrees,
   launchInOrca,
   openChangedInOrca,
+  registerInOrca,
   orcaSleepingPathSet,
   orcaWorktreePathSet,
   readOrcaScreen,
@@ -1129,7 +1130,15 @@ function setOrcaAgents(agents: Map<string, OrcaAgent>, paneBySession: Map<string
 /** 右クリックメニューの Orca 専用項目（261005_2）。Orca 対象のプロジェクトだけに出す */
 function orcaMenuItems(project: Project, sessionId: string | undefined): MenuItemConstructorOptions[] {
   if (project.clickTarget !== "orca") return [];
+  // Orca に登録（261015_1）: 一覧で登録済みと分かるときだけ無効化（Orca が閉じていて一覧が無いときは押せる）
+  const key = normalizePath(project.path);
+  const registered = orcaPaths?.has(key) === true || orcaSleepingPaths.has(key);
   return [
+    {
+      label: registered ? "Orca に登録済み" : "Orca に登録（フォルダを追加）",
+      enabled: !registered,
+      click: () => { void registerProjectInOrca(project.id); },
+    },
     {
       label: "Orca: 画面を見て返信…",
       click: () => { win?.webContents.send("orca-panel-request", project.id, sessionId ?? null); },
@@ -1146,6 +1155,37 @@ function orcaMenuItems(project: Project, sessionId: string | undefined): MenuIte
       },
     },
   ];
+}
+
+/**
+ * Orca に登録（261015_1）。git 管理外のフォルダは Orca の CLI が受け付けないため、
+ * ユーザーに確認してから git init → 登録する（.git フォルダができる）
+ */
+async function registerProjectInOrca(id: string): Promise<void> {
+  const project = projectStore.getProject(id);
+  if (project === null || win === null) return;
+  setStatus(`${project.name} を Orca に登録しています…`);
+  let r = await registerInOrca(project.path, { initGit: false });
+  if (!r.ok && r.needsGit === true && !win.isDestroyed()) {
+    const { response } = await dialog.showMessageBox(win, {
+      type: "question",
+      title: "Orca に登録",
+      message: `${project.name} は git 管理外です。git init してから Orca に登録しますか？`,
+      detail: `${project.path} に .git フォルダを作ります（ファイルは変更しません）。Orca の CLI は git 管理のフォルダしか登録できないためです。`,
+      buttons: ["git init して登録", "やめる"],
+      defaultId: 0,
+      cancelId: 1,
+      noLink: true,
+    });
+    if (response !== 0) {
+      setStatus("Orca への登録をやめました");
+      return;
+    }
+    r = await registerInOrca(project.path, { initGit: true });
+  }
+  logger.info(`Orca 登録 ${r.ok ? "成功" : "失敗"}: ${project.name}${r.already === true ? "（登録済み）" : ""}${r.message ? ` (${r.message})` : ""}`);
+  setStatus(r.ok ? `${project.name} を Orca に登録しました。タイルをクリックするとターミナルを開きます` : (r.message ?? "Orca への登録に失敗しました"));
+  pollWindowPresence();
 }
 
 /** 指示の履歴（261005_3）。Codex は保存先を順に試し、Claude は記録済みの transcript（無ければ探索）を読む */
